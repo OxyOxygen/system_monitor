@@ -1,119 +1,119 @@
 # System Monitor
 
-Gerçek zamanlı sistem kaynaklarını izleyen modern bir masaüstü uygulaması.
+A modern desktop application for real-time system resource monitoring.
 
-## Özellikler
+## Features
 
-- CPU kullanım yüzdesi
-- RAM kullanımı ve toplam bellek bilgisi
-- Disk alanı kullanımı (C: sürücüsü)
-- GPU kullanımı ve VRAM takibi
-- Pil durumu ve güç yönetimi
-- Modern grafiksel arayüz
+- CPU usage percentage
+- RAM usage and total memory information
+- Disk space usage (C: drive)
+- GPU usage and VRAM tracking
+- Battery status and power management
+- Modern graphical user interface
 
-## Gereksinimler
+## Requirements
 
-### Yazılım
-- Windows 10 veya üstü
-- CMake 3.15 veya üstü
-- Visual Studio 2019/2022 veya MinGW derleyici
-- OpenGL desteği (genellikle sistem ile gelir)
+### Software
+- Windows 10 or later
+- CMake 3.15 or later
+- Visual Studio 2019/2022 or MinGW compiler
+- OpenGL support (usually comes with the system)
 
-### Donanım
-- Herhangi bir Windows bilgisayar
-- GPU izleme için uyumlu ekran kartı sürücüleri (opsiyonel)
+### Hardware
+- Any Windows computer
+- Compatible GPU drivers for GPU monitoring (optional)
 
-## Kurulum ve Derleme
+## Installation and Build
 
-### Yöntem 1: Build Script ile (Önerilen)
+### Method 1: Using Build Script (Recommended)
 
 ```powershell
-# Proje dizinine gidin
+# Navigate to project directory
 cd "d:/C_C++ Projects/System Monitor"
 
-# Build script'i çalıştırın
+# Run build script
 ./build.ps1
 ```
 
-### Yöntem 2: Manuel CMake
+### Method 2: Manual CMake
 
 ```powershell
-# Proje dizinine gidin
+# Navigate to project directory
 cd "d:/C_C++ Projects/System Monitor"
 
-# Build dosyalarını oluşturun
+# Generate build files
 cmake -B build -G "Visual Studio 17 2022"
 
-# Projeyi derleyin
+# Build project
 cmake --build build --config Release
 
-# Programı çalıştırın
+# Run the program
 ./build/Release/SystemMonitor.exe
 ```
 
-### Yöntem 3: Visual Studio ile
+### Method 3: Using Visual Studio
 
-1. Visual Studio 2019 veya 2022'yi açın
-2. File > Open > CMake seçin
-3. CMakeLists.txt dosyasını seçin
+1. Open Visual Studio 2019 or 2022
+2. Select File > Open > CMake
+3. Choose the CMakeLists.txt file
 4. Build > Build All (F7)
 5. Debug > Start (F5)
 
-## Kullanım
+## Usage
 
-Program başlatıldığında beş farklı bilgi paneli gösterir:
+When the program starts, it displays five information panels:
 
-- **CPU**: Anlık işlemci kullanım yüzdesi
-- **Memory**: Kullanılan ve toplam RAM bilgisi
-- **Disk**: C sürücüsünün doluluk durumu
-- **GPU**: Ekran kartı kullanımı (uyumluysa)
-- **Power**: Pil durumu, AC/Battery modu, kalan süre
+- **CPU**: Real-time processor usage percentage
+- **Memory**: Used and total RAM information
+- **Disk**: C drive usage status
+- **GPU**: Graphics card usage (if compatible)
+- **Power**: Battery status, AC/Battery mode, remaining time
 
-Bilgiler saniyede bir otomatik güncellenir. Pencereyi kapatarak programdan çıkabilirsiniz.
+Information is automatically updated every second. Close the window to exit the program.
 
-## Teknik Detaylar
+## Technical Details
 
-### Kullanılan Teknolojiler
-- C++17 standardı
+### Technologies Used
+- C++17 standard
 - ImGui (Dear ImGui) - GUI framework
-- GLFW - Pencere yönetimi
-- OpenGL 3.0 - Grafik rendering
-- Windows PDH API - CPU ve GPU izleme
-- Windows API - Bellek, disk ve güç yönetimi
+- GLFW - Window management
+- OpenGL 3.0 - Graphics rendering
+- Windows PDH API - CPU and GPU monitoring
+- Windows API - Memory, disk, and power management
 
-### Proje Yapısı
+### Project Structure
 ```
 System Monitor/
-├── src/                    # Kaynak kod dosyaları
-│   ├── main.cpp           # Ana program
-│   ├── cpu_monitor.cpp    # CPU izleme
-│   ├── memory_monitor.cpp # Bellek izleme
-│   ├── disk_monitor.cpp   # Disk izleme
-│   ├── gpu_monitor.cpp    # GPU izleme
-│   ├── power_monitor.cpp  # Güç izleme
-│   └── gui.cpp            # Grafiksel arayüz
-├── include/               # Header dosyaları
-├── external/              # Harici kütüphaneler
-│   ├── imgui/            # ImGui kütüphanesi
-│   └── glfw/             # GLFW kütüphanesi
-└── CMakeLists.txt        # CMake yapılandırması
+├── src/                    # Source code files
+│   ├── main.cpp           # Main program
+│   ├── cpu_monitor.cpp    # CPU monitoring
+│   ├── memory_monitor.cpp # Memory monitoring
+│   ├── disk_monitor.cpp   # Disk monitoring
+│   ├── gpu_monitor.cpp    # GPU monitoring
+│   ├── power_monitor.cpp  # Power monitoring
+│   └── gui.cpp            # Graphical interface
+├── include/               # Header files
+├── external/              # External libraries
+│   ├── imgui/            # ImGui library
+│   └── glfw/             # GLFW library
+└── CMakeLists.txt        # CMake configuration
 ```
 
-## Sorun Giderme
+## Troubleshooting
 
-### "Windows.h bulunamadı" hatası
-Visual Studio'da MSVC derleyicisi kullanarak derlemeyi deneyin. VS Code'daki IntelliSense hataları görmezden gelebilirsiniz.
+### "Windows.h not found" error
+Try compiling using the MSVC compiler in Visual Studio. You can ignore IntelliSense errors in VS Code.
 
-### GPU izleme çalışmıyor
-GPU performans sayaçları bazı sistemlerde mevcut olmayabilir. Program GPU widget'ında "not available" mesajı gösterecektir.
+### GPU monitoring not working
+GPU performance counters may not be available on some systems. The program will display a "not available" message in the GPU widget.
 
-### CMake bulunamıyor
-Visual Studio kuruluysa, doğrudan CMakeLists.txt dosyasını Visual Studio ile açabilirsiniz.
+### CMake not found
+If Visual Studio is installed, you can open the CMakeLists.txt file directly in Visual Studio.
 
-## Lisans
+## License
 
 MIT License
 
-## Geliştirici Notları
+## Developer Notes
 
-Proje öğrenme amaçlı geliştirilmiştir. Windows sistem programlama, GUI geliştirme ve gerçek zamanlı veri izleme konularında pratik yapmak için uygundur.
+This project was developed for learning purposes. It is suitable for practicing Windows system programming, GUI development, and real-time data monitoring.
