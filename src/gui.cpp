@@ -160,7 +160,8 @@ void GUI::render(double cpuUsage, const std::vector<double> &coreUsages,
                  const GpuInfo &gpuInfo, const PowerInfo &powerInfo,
                  const std::vector<ProcessInfo> &processes,
                  const NetworkInfo &netInfo, const SystemInfo &sysInfo,
-                 const EnergyInfo &energyInfo) {
+                 const EnergyInfo &energyInfo, const AiInfo &aiInfo,
+                 const NvmlInfo &nvmlInfo, const BenchmarkResult &benchResult) {
   // Update history
   float memPercent = static_cast<float>(memInfo.usagePercent);
   float gpuPercent =
@@ -230,6 +231,8 @@ void GUI::render(double cpuUsage, const std::vector<double> &coreUsages,
   drawTab(" Processes  ", Tab::Processes);
   drawTab("  Network   ", Tab::Network);
   drawTab("  Energy    ", Tab::Energy);
+  drawTab("    AI      ", Tab::AI);
+  drawTab(" GPU Compute", Tab::GpuCompute);
   drawTab("  System    ", Tab::System);
 
   ImGui::PopStyleVar();
@@ -262,6 +265,12 @@ void GUI::render(double cpuUsage, const std::vector<double> &coreUsages,
     break;
   case Tab::Energy:
     renderEnergyTab(energyInfo, gpuInfo);
+    break;
+  case Tab::AI:
+    renderAiTab(aiInfo);
+    break;
+  case Tab::GpuCompute:
+    renderGpuComputeTab(nvmlInfo, benchResult);
     break;
   case Tab::System:
     renderSystemTab(sysInfo);
@@ -1004,6 +1013,579 @@ void GUI::renderEnergyTab(const EnergyInfo &energyInfo,
     oss << "  |  GPU: " << gpuInfo.gpuName;
     ImGui::TextColored(COL_TEXT_DIM, "%s", oss.str().c_str());
   }
+}
+
+// ─── AI Tab ──────────────────────────────────────────────────────────────────
+static const ImVec4 COL_AI_ACCENT = ImVec4(0.85f, 0.20f, 1.00f, 1.00f);
+static const ImVec4 COL_AI_ACTIVE = ImVec4(0.20f, 1.00f, 0.50f, 1.00f);
+static const ImVec4 COL_AI_IDLE = ImVec4(1.00f, 0.85f, 0.25f, 1.00f);
+static const ImVec4 COL_AI_NONE = ImVec4(0.55f, 0.56f, 0.62f, 1.00f);
+
+void GUI::renderAiTab(const AiInfo &aiInfo) {
+  ImGui::TextColored(COL_AI_ACCENT, "AI ENGINEER DASHBOARD");
+  ImGui::SameLine(ImGui::GetContentRegionAvail().x - 350);
+  ImGui::TextColored(COL_TEXT_DIM, "%s", aiInfo.computeSummary.c_str());
+  ImGui::Spacing();
+  ImGui::Spacing();
+
+  float contentWidth = ImGui::GetContentRegionAvail().x;
+  float halfWidth = (contentWidth - 15) / 2.0f;
+
+  // ── Row 1: AI Status + GPU for AI ──
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
+  ImGui::BeginChild("##AiStatusSection", ImVec2(halfWidth, 260), true);
+  {
+    ImGui::TextColored(COL_AI_ACCENT, "AI WORKLOAD STATUS");
+    ImGui::Spacing();
+    ImGui::Spacing();
+
+    // Status indicator
+    ImVec4 statusColor = COL_AI_NONE;
+    if (aiInfo.workloadStatus == "Active")
+      statusColor = COL_AI_ACTIVE;
+    else if (aiInfo.workloadStatus == "Idle")
+      statusColor = COL_AI_IDLE;
+
+    // Draw status circle
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    float circleR = 8.0f;
+    dl->AddCircleFilled(ImVec2(p.x + circleR + 4, p.y + circleR), circleR,
+                        ImColor(statusColor));
+    // Glow effect
+    dl->AddCircle(ImVec2(p.x + circleR + 4, p.y + circleR), circleR + 3,
+                  ImColor(statusColor.x, statusColor.y, statusColor.z, 0.3f), 0,
+                  2.0f);
+    ImGui::Dummy(ImVec2(circleR * 2 + 12, circleR * 2));
+    ImGui::SameLine();
+    ImGui::TextColored(statusColor, "%s", aiInfo.workloadStatus.c_str());
+
+    ImGui::Spacing();
+    ImGui::TextColored(COL_TEXT_DIM, "%s", aiInfo.workloadStatusDesc.c_str());
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // AI Process count
+    {
+      std::ostringstream oss;
+      oss << aiInfo.totalAiProcesses;
+      renderInfoRow("AI Processes", oss.str().c_str(),
+                    aiInfo.totalAiProcesses > 0 ? COL_AI_ACTIVE : COL_TEXT_DIM);
+    }
+
+    // AI Power estimate
+    if (aiInfo.gpuAvailable && aiInfo.totalAiProcesses > 0) {
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(0) << aiInfo.aiPowerEstimateW
+          << " W";
+      renderInfoRow("AI Power Draw", oss.str().c_str(), COL_YELLOW);
+    } else {
+      renderInfoRow("AI Power Draw", "0 W", COL_TEXT_DIM);
+    }
+
+    // Environment
+    renderInfoRow("CUDA", aiInfo.cudaDetected ? "Ready" : "Not Detected",
+                  aiInfo.cudaDetected ? COL_GREEN : COL_TEXT_DIM);
+    renderInfoRow("Python", aiInfo.pythonDetected ? "Detected" : "Not Found",
+                  aiInfo.pythonDetected ? COL_GREEN : COL_TEXT_DIM);
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
+
+  ImGui::SameLine();
+
+  // ── GPU for AI panel ──
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
+  ImGui::BeginChild("##GpuAiSection", ImVec2(halfWidth, 260), true);
+  {
+    ImGui::TextColored(COL_ORANGE, "GPU FOR AI");
+    if (!aiInfo.gpuName.empty()) {
+      ImGui::SameLine();
+      ImGui::TextColored(COL_TEXT_DIM, " %s", aiInfo.gpuName.c_str());
+    }
+    ImGui::Spacing();
+
+    if (aiInfo.gpuAvailable) {
+      // GPU Usage
+      {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(1) << aiInfo.gpuUsagePercent
+            << "%%";
+        renderInfoRow("GPU Load", oss.str().c_str(), COL_ORANGE);
+      }
+
+      // VRAM usage bar
+      ImGui::Spacing();
+      ImGui::TextColored(COL_TEXT_DIM, "VRAM Usage:");
+      {
+        double vramUsedGB =
+            static_cast<double>(aiInfo.vramUsed) / (1024.0 * 1024.0 * 1024.0);
+        double vramTotalGB =
+            static_cast<double>(aiInfo.vramTotal) / (1024.0 * 1024.0 * 1024.0);
+        double vramFreeGB =
+            static_cast<double>(aiInfo.vramFree) / (1024.0 * 1024.0 * 1024.0);
+
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(1) << vramUsedGB << " / "
+            << std::setprecision(0) << vramTotalGB << " GB";
+        ImGui::SameLine();
+        ImGui::TextColored(COL_TEXT, " %s", oss.str().c_str());
+
+        float vramFrac = static_cast<float>(aiInfo.vramUsagePercent / 100.0);
+        ImVec4 vramColor = vramFrac > 0.9f   ? COL_RED
+                           : vramFrac > 0.7f ? COL_YELLOW
+                                             : COL_CYAN;
+        ImGui::Spacing();
+        renderMiniBar("##vramAiBar", vramFrac, vramColor);
+
+        ImGui::Spacing();
+        oss.str("");
+        oss << std::fixed << std::setprecision(1) << vramFreeGB << " GB free";
+        ImGui::TextColored(COL_TEXT_DIM, "%s", oss.str().c_str());
+      }
+
+      // Temperature & Power
+      ImGui::Spacing();
+      {
+        std::ostringstream oss;
+        if (aiInfo.temperatureC > 0) {
+          oss << std::fixed << std::setprecision(0) << aiInfo.temperatureC
+              << " C";
+          ImVec4 tempColor = aiInfo.temperatureC > 80   ? COL_RED
+                             : aiInfo.temperatureC > 65 ? COL_YELLOW
+                                                        : COL_GREEN;
+          renderInfoRow("Temperature", oss.str().c_str(), tempColor);
+        }
+        oss.str("");
+        oss << std::fixed << std::setprecision(0) << aiInfo.powerDrawWatts
+            << " W / " << aiInfo.tdpWatts << " W TDP";
+        renderInfoRow("Power", oss.str().c_str(), COL_YELLOW);
+      }
+    } else {
+      ImGui::Spacing();
+      ImGui::Spacing();
+      ImGui::TextColored(COL_TEXT_DIM, "No GPU detected");
+      ImGui::TextColored(COL_TEXT_DIM, "AI workloads require a GPU");
+    }
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
+
+  ImGui::Spacing();
+  ImGui::Spacing();
+
+  // ── Row 2: AI Processes + Model Capacity ──
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
+  ImGui::BeginChild("##AiProcessesSection", ImVec2(halfWidth, 320), true);
+  {
+    ImGui::TextColored(COL_AI_ACCENT, "AI PROCESSES");
+    ImGui::Spacing();
+    ImGui::Spacing();
+
+    if (aiInfo.processes.empty()) {
+      ImGui::Spacing();
+      ImGui::TextColored(COL_TEXT_DIM, "No AI/ML processes running");
+      ImGui::Spacing();
+      ImGui::TextColored(COL_TEXT_DIM, "Detects: Python, Ollama, PyTorch,");
+      ImGui::TextColored(COL_TEXT_DIM, "TensorFlow, Stable Diffusion,");
+      ImGui::TextColored(COL_TEXT_DIM, "LM Studio, ComfyUI, Whisper...");
+    } else {
+      ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_ScrollY;
+
+      if (ImGui::BeginTable("##AiProcTable", 3, flags,
+                            ImVec2(0, ImGui::GetContentRegionAvail().y - 10))) {
+        ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+        ImGui::TableSetupColumn("Process", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Memory", ImGuiTableColumnFlags_WidthFixed,
+                                120.0f);
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableHeadersRow();
+
+        for (const auto &proc : aiInfo.processes) {
+          ImGui::TableNextRow(ImGuiTableRowFlags_None, 28.0f);
+
+          ImGui::TableSetColumnIndex(0);
+          ImGui::TextColored(COL_TEXT_DIM, "%lu", proc.pid);
+
+          ImGui::TableSetColumnIndex(1);
+          ImGui::TextColored(COL_TEXT, "%s", proc.name.c_str());
+
+          ImGui::TableSetColumnIndex(2);
+          ImGui::TextColored(COL_CYAN, "%s",
+                             formatBytes(proc.memoryUsed).c_str());
+        }
+        ImGui::EndTable();
+      }
+    }
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
+
+  ImGui::SameLine();
+
+  // ── Model Capacity Estimator ──
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
+  ImGui::BeginChild("##ModelCapacity", ImVec2(halfWidth, 320), true);
+  {
+    ImGui::TextColored(COL_AI_ACCENT, "MODEL CAPACITY ESTIMATOR");
+    ImGui::Spacing();
+
+    if (!aiInfo.gpuAvailable || aiInfo.vramTotal == 0) {
+      ImGui::TextColored(COL_TEXT_DIM, "GPU required for model estimation");
+    } else {
+      double totalGB =
+          static_cast<double>(aiInfo.vramTotal) / (1024.0 * 1024.0 * 1024.0);
+      {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(0) << totalGB
+            << " GB VRAM available";
+        ImGui::TextColored(COL_TEXT_DIM, "%s", oss.str().c_str());
+      }
+      ImGui::Spacing();
+
+      ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_ScrollY;
+
+      if (ImGui::BeginTable("##ModelTable", 4, flags,
+                            ImVec2(0, ImGui::GetContentRegionAvail().y - 10))) {
+        ImGui::TableSetupColumn("Model", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed,
+                                70.0f);
+        ImGui::TableSetupColumn("VRAM", ImGuiTableColumnFlags_WidthFixed,
+                                70.0f);
+        ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed,
+                                50.0f);
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableHeadersRow();
+
+        for (const auto &model : aiInfo.modelCapabilities) {
+          ImGui::TableNextRow(ImGuiTableRowFlags_None, 26.0f);
+
+          ImGui::TableSetColumnIndex(0);
+          ImGui::TextColored(model.canRun ? COL_TEXT : COL_TEXT_DIM, "%s",
+                             model.name.c_str());
+
+          ImGui::TableSetColumnIndex(1);
+          ImVec4 catColor = COL_TEXT_DIM;
+          if (model.category == "LLM")
+            catColor = COL_AI_ACCENT;
+          else if (model.category == "Vision")
+            catColor = COL_CYAN;
+          else if (model.category == "Diffusion")
+            catColor = COL_ORANGE;
+          else if (model.category == "Audio")
+            catColor = COL_YELLOW;
+          ImGui::TextColored(catColor, "%s", model.category.c_str());
+
+          ImGui::TableSetColumnIndex(2);
+          {
+            std::ostringstream oss;
+            oss << std::fixed << std::setprecision(1) << model.requiredVramGB
+                << " GB";
+            ImGui::TextColored(COL_TEXT_DIM, "%s", oss.str().c_str());
+          }
+
+          ImGui::TableSetColumnIndex(3);
+          if (model.canRun) {
+            ImGui::TextColored(COL_GREEN, "  OK");
+          } else {
+            ImGui::TextColored(COL_RED, "  NO");
+          }
+        }
+        ImGui::EndTable();
+      }
+    }
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
+}
+
+// ─── GPU Compute Tab ─────────────────────────────────────────────────────────
+static const ImVec4 COL_GPU_ACCENT = ImVec4(0.30f, 0.90f, 0.40f, 1.00f);
+static const ImVec4 COL_GPU_WARM = ImVec4(1.00f, 0.65f, 0.00f, 1.00f);
+static const ImVec4 COL_GPU_HOT = ImVec4(1.00f, 0.30f, 0.20f, 1.00f);
+
+void GUI::renderGpuComputeTab(const NvmlInfo &nvmlInfo,
+                              const BenchmarkResult &benchResult) {
+  ImGui::TextColored(COL_GPU_ACCENT, "GPU COMPUTE DASHBOARD");
+  ImGui::SameLine(ImGui::GetContentRegionAvail().x - 200);
+  if (nvmlInfo.available) {
+    ImGui::TextColored(COL_TEXT_DIM, "NVML Active | Driver %s",
+                       nvmlInfo.driverVersion.c_str());
+  } else {
+    ImGui::TextColored(COL_GPU_HOT, "NVML Not Available");
+  }
+  ImGui::Spacing();
+  ImGui::Spacing();
+
+  float contentWidth = ImGui::GetContentRegionAvail().x;
+  float halfWidth = (contentWidth - 15) / 2.0f;
+
+  // ── Panel 1: NVML Real-Time Metrics (left) ──
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
+  ImGui::BeginChild("##NvmlMetrics", ImVec2(halfWidth, 380), true);
+  {
+    ImGui::TextColored(COL_CYAN, "REAL-TIME GPU METRICS");
+    ImGui::Spacing();
+    ImGui::Spacing();
+
+    if (nvmlInfo.available) {
+      // Temperature
+      ImVec4 tempColor = COL_GREEN;
+      if (nvmlInfo.temperatureC > 80)
+        tempColor = COL_GPU_HOT;
+      else if (nvmlInfo.temperatureC > 65)
+        tempColor = COL_GPU_WARM;
+      char tempStr[32];
+      snprintf(tempStr, sizeof(tempStr), "%u C", nvmlInfo.temperatureC);
+      renderInfoRow("Temperature", tempStr, tempColor);
+
+      char powerStr[32];
+      snprintf(powerStr, sizeof(powerStr), "%.1f W", nvmlInfo.powerWatts);
+      renderInfoRow("Power Draw", powerStr, COL_ORANGE);
+
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::Spacing();
+
+      // Utilization
+      ImGui::TextColored(COL_PURPLE, "UTILIZATION");
+      ImGui::Spacing();
+
+      char gpuUtilStr[32];
+      snprintf(gpuUtilStr, sizeof(gpuUtilStr), "%u%%", nvmlInfo.gpuUtil);
+      renderInfoRow("GPU Compute", gpuUtilStr, COL_GREEN);
+      ImGui::ProgressBar(nvmlInfo.gpuUtil / 100.0f, ImVec2(-1, 14), "");
+
+      char memUtilStr[32];
+      snprintf(memUtilStr, sizeof(memUtilStr), "%u%%", nvmlInfo.memUtil);
+      renderInfoRow("Memory Bus", memUtilStr, COL_CYAN);
+      ImGui::ProgressBar(nvmlInfo.memUtil / 100.0f, ImVec2(-1, 14), "");
+
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::Spacing();
+
+      // Clocks
+      ImGui::TextColored(COL_PURPLE, "CLOCKS");
+      ImGui::Spacing();
+
+      char gfxClk[32], memClk[32], smClk[32];
+      snprintf(gfxClk, sizeof(gfxClk), "%u MHz", nvmlInfo.graphicsClock);
+      snprintf(memClk, sizeof(memClk), "%u MHz", nvmlInfo.memClock);
+      snprintf(smClk, sizeof(smClk), "%u MHz", nvmlInfo.smClock);
+
+      renderInfoRow("Graphics", gfxClk, COL_TEXT);
+      renderInfoRow("Memory", memClk, COL_TEXT);
+      renderInfoRow("SM", smClk, COL_TEXT);
+
+      ImGui::Spacing();
+
+      // Fan & PCIe
+      char fanStr[32];
+      snprintf(fanStr, sizeof(fanStr), "%u%%", nvmlInfo.fanSpeedPercent);
+      renderInfoRow("Fan Speed", fanStr, COL_TEXT_DIM);
+
+      char pcieStr[64];
+      snprintf(pcieStr, sizeof(pcieStr), "RX %.1f | TX %.1f MB/s",
+               nvmlInfo.pcieRxKBs / 1024.0f, nvmlInfo.pcieTxKBs / 1024.0f);
+      renderInfoRow("PCIe", pcieStr, COL_TEXT_DIM);
+
+      if (nvmlInfo.encoderUtil > 0 || nvmlInfo.decoderUtil > 0) {
+        char encStr[48];
+        snprintf(encStr, sizeof(encStr), "Enc %u%% | Dec %u%%",
+                 nvmlInfo.encoderUtil, nvmlInfo.decoderUtil);
+        renderInfoRow("NVENC/DEC", encStr, COL_TEXT_DIM);
+      }
+    } else {
+      ImGui::TextColored(COL_TEXT_DIM, "NVIDIA driver not detected.\n"
+                                       "Install NVIDIA drivers for\n"
+                                       "real-time GPU metrics via NVML.");
+    }
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
+
+  ImGui::SameLine();
+
+  // ── Panel 2: Compute Capabilities + GPU Processes (right) ──
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
+  ImGui::BeginChild("##GpuComputeInfo", ImVec2(halfWidth, 380), true);
+  {
+    ImGui::TextColored(COL_CYAN, "COMPUTE CAPABILITIES");
+    ImGui::Spacing();
+    ImGui::Spacing();
+
+    if (nvmlInfo.available && nvmlInfo.cudaCapMajor > 0) {
+      char capStr[32];
+      snprintf(capStr, sizeof(capStr), "%d.%d", nvmlInfo.cudaCapMajor,
+               nvmlInfo.cudaCapMinor);
+      renderInfoRow("CUDA Capability", capStr, COL_GREEN);
+
+      char coresStr[32];
+      snprintf(coresStr, sizeof(coresStr), "%d cores/SM",
+               nvmlInfo.cudaCoreCount);
+      renderInfoRow("CUDA Cores", coresStr, COL_TEXT);
+
+      const char *archName = "Unknown";
+      switch (nvmlInfo.cudaCapMajor) {
+      case 5:
+        archName = "Maxwell";
+        break;
+      case 6:
+        archName = "Pascal";
+        break;
+      case 7:
+        archName = (nvmlInfo.cudaCapMinor >= 5) ? "Turing" : "Volta";
+        break;
+      case 8:
+        archName = "Ampere";
+        break;
+      case 9:
+        archName = "Ada Lovelace";
+        break;
+      case 10:
+        archName = "Blackwell";
+        break;
+      }
+      renderInfoRow("Architecture", archName, COL_PURPLE);
+
+      bool hasTensor = (nvmlInfo.cudaCapMajor >= 7);
+      bool hasRt = (nvmlInfo.cudaCapMajor >= 7 && nvmlInfo.cudaCapMinor >= 5) ||
+                   (nvmlInfo.cudaCapMajor >= 8);
+      renderInfoRow("Tensor Cores", hasTensor ? "Yes" : "No",
+                    hasTensor ? COL_GREEN : COL_TEXT_DIM);
+      renderInfoRow("RT Cores", hasRt ? "Yes" : "No",
+                    hasRt ? COL_GREEN : COL_TEXT_DIM);
+      renderInfoRow("Driver", nvmlInfo.driverVersion.c_str(), COL_TEXT_DIM);
+    } else {
+      ImGui::TextColored(COL_TEXT_DIM, "CUDA info not available");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::TextColored(COL_ORANGE, "ACTIVE GPU PROCESSES");
+    ImGui::Spacing();
+
+    if (nvmlInfo.gpuProcesses.empty()) {
+      ImGui::TextColored(COL_TEXT_DIM, "No compute processes on GPU");
+    } else {
+      ImGui::Columns(3, "##GpuProcs", true);
+      ImGui::SetColumnWidth(0, 60);
+      ImGui::SetColumnWidth(1, 150);
+      ImGui::TextColored(COL_TEXT_DIM, "PID");
+      ImGui::NextColumn();
+      ImGui::TextColored(COL_TEXT_DIM, "Process");
+      ImGui::NextColumn();
+      ImGui::TextColored(COL_TEXT_DIM, "VRAM");
+      ImGui::NextColumn();
+      ImGui::Separator();
+
+      for (const auto &proc : nvmlInfo.gpuProcesses) {
+        ImGui::Text("%u", proc.pid);
+        ImGui::NextColumn();
+        ImGui::TextColored(COL_GREEN, "%s", proc.name.c_str());
+        ImGui::NextColumn();
+        float vramMB = proc.vramUsageBytes / (1024.0f * 1024.0f);
+        if (vramMB > 1024.0f)
+          ImGui::Text("%.1f GB", vramMB / 1024.0f);
+        else
+          ImGui::Text("%.0f MB", vramMB);
+        ImGui::NextColumn();
+      }
+      ImGui::Columns(1);
+    }
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
+
+  ImGui::Spacing();
+  ImGui::Spacing();
+
+  // ── Panel 3: Benchmark Results (full width) ──
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
+  ImGui::BeginChild("##BenchmarkPanel", ImVec2(-1, 200), true);
+  {
+    ImGui::TextColored(COL_CYAN, "GPU BENCHMARK");
+    ImGui::Spacing();
+    ImGui::Spacing();
+
+    if (benchResult.valid) {
+      float w = ImGui::GetContentRegionAvail().x;
+      float colW = (w - 30) / 4.0f;
+
+      ImGui::BeginChild("##BFP32", ImVec2(colW, 80), true);
+      ImGui::TextColored(COL_GPU_ACCENT, "FP32 TFLOPS");
+      char fp32[16];
+      snprintf(fp32, sizeof(fp32), "%.1f", benchResult.fp32Tflops);
+      ImGui::SetCursorPosX(
+          (ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(fp32).x) /
+          2.0f);
+      ImGui::TextColored(COL_GREEN, "%s", fp32);
+      ImGui::EndChild();
+      ImGui::SameLine();
+
+      ImGui::BeginChild("##BFP16", ImVec2(colW, 80), true);
+      ImGui::TextColored(COL_GPU_ACCENT, "FP16 TFLOPS");
+      char fp16[16];
+      snprintf(fp16, sizeof(fp16), "%.1f", benchResult.fp16Tflops);
+      ImGui::SetCursorPosX(
+          (ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(fp16).x) /
+          2.0f);
+      ImGui::TextColored(COL_CYAN, "%s", fp16);
+      ImGui::EndChild();
+      ImGui::SameLine();
+
+      ImGui::BeginChild("##BBW", ImVec2(colW, 80), true);
+      ImGui::TextColored(COL_GPU_ACCENT, "VRAM BW (GB/s)");
+      char bw[16];
+      if (benchResult.bandwidthMeasured)
+        snprintf(bw, sizeof(bw), "%.1f", benchResult.vramBandwidthGBs);
+      else
+        snprintf(bw, sizeof(bw), "N/A");
+      ImGui::SetCursorPosX(
+          (ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(bw).x) /
+          2.0f);
+      ImGui::TextColored(COL_ORANGE, "%s", bw);
+      ImGui::EndChild();
+      ImGui::SameLine();
+
+      ImGui::BeginChild("##BScore", ImVec2(colW, 80), true);
+      ImGui::TextColored(COL_GPU_ACCENT, "AI SCORE");
+      char sc[16];
+      snprintf(sc, sizeof(sc), "%d/100", benchResult.score);
+      ImVec4 scCol =
+          benchResult.score >= 60
+              ? COL_GREEN
+              : (benchResult.score >= 30 ? COL_GPU_WARM : COL_GPU_HOT);
+      ImGui::SetCursorPosX(
+          (ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(sc).x) /
+          2.0f);
+      ImGui::TextColored(scCol, "%s", sc);
+      ImGui::EndChild();
+
+      ImGui::Spacing();
+      ImGui::TextColored(scCol, "%s", benchResult.scoreLabel.c_str());
+      ImGui::SameLine(ImGui::GetContentRegionAvail().x - 200);
+      ImGui::TextColored(COL_TEXT_DIM, "@ %s | %d cores | %u MHz",
+                         benchResult.timestamp.c_str(), benchResult.cudaCores,
+                         benchResult.clockMHz);
+    } else {
+      ImGui::TextColored(COL_TEXT_DIM,
+                         "No benchmark results yet. Run the benchmark from the "
+                         "application to test GPU compute performance.");
+      ImGui::Spacing();
+      ImGui::TextColored(COL_TEXT_DIM,
+                         "Measures: Theoretical TFLOPS (FP32/FP16), VRAM "
+                         "bandwidth (GB/s), AI readiness score (0-100).");
+    }
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
 }
 
 // ─── System Tab (NEW) ───────────────────────────────────────────────────────

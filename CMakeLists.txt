@@ -46,6 +46,9 @@ set(SOURCES
     src/network_monitor.cpp
     src/system_info.cpp
     src/energy_monitor.cpp
+    src/ai_monitor.cpp
+    src/nvml_monitor.cpp
+    src/gpu_benchmark.cpp
     src/gui.cpp
 )
 
@@ -60,6 +63,7 @@ target_link_libraries(${PROJECT_NAME}
     psapi        # Process Status API
     iphlpapi     # IP Helper API (network stats)
     dxgi         # DXGI (GPU detection)
+    d3d11        # Direct3D 11 (GPU benchmark)
 )
 
 # Set as startup project for Visual Studio

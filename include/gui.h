@@ -1,11 +1,14 @@
 #pragma once
 
+#include "ai_monitor.h"
 #include "cpu_monitor.h"
 #include "disk_monitor.h"
 #include "energy_monitor.h"
+#include "gpu_benchmark.h"
 #include "gpu_monitor.h"
 #include "memory_monitor.h"
 #include "network_monitor.h"
+#include "nvml_monitor.h"
 #include "power_monitor.h"
 #include "process_monitor.h"
 #include "system_info.h"
@@ -16,7 +19,15 @@
 
 struct GLFWwindow;
 
-enum class Tab { Overview = 0, Processes, Network, Energy, System };
+enum class Tab {
+  Overview = 0,
+  Processes,
+  Network,
+  Energy,
+  AI,
+  GpuCompute,
+  System
+};
 
 class GUI {
 public:
@@ -31,7 +42,8 @@ public:
               const GpuInfo &gpuInfo, const PowerInfo &powerInfo,
               const std::vector<ProcessInfo> &processes,
               const NetworkInfo &netInfo, const SystemInfo &sysInfo,
-              const EnergyInfo &energyInfo);
+              const EnergyInfo &energyInfo, const AiInfo &aiInfo,
+              const NvmlInfo &nvmlInfo, const BenchmarkResult &benchResult);
   void endFrame();
   void cleanup();
 
@@ -69,6 +81,9 @@ private:
   void renderProcessesTab(const std::vector<ProcessInfo> &processes);
   void renderNetworkTab(const NetworkInfo &netInfo);
   void renderEnergyTab(const EnergyInfo &energyInfo, const GpuInfo &gpuInfo);
+  void renderAiTab(const AiInfo &aiInfo);
+  void renderGpuComputeTab(const NvmlInfo &nvmlInfo,
+                           const BenchmarkResult &benchResult);
   void renderSystemTab(const SystemInfo &sysInfo);
 
   // Custom widgets

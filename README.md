@@ -1,6 +1,6 @@
-# System Monitor v3.0
+# System Monitor v5.0
 
-A modern desktop application for real-time system resource monitoring with **AI-aware energy cost tracking** and a premium dark UI.
+A modern desktop application for real-time system resource monitoring with **GPU Compute Dashboard**, **AI Engineer Dashboard**, **energy cost tracking**, and a premium dark UI. Built for AI/ML developers and GPU programmers who need deep hardware visibility.
 
 ## ⚡ Key Feature: Energy Cost Tracking
 
@@ -13,6 +13,16 @@ Unlike any other system monitor, this app estimates your **real-time electricity
 - **40+ GPU/CPU TDP profiles** — auto-detects your hardware for accurate estimates
 
 Perfect for **AI/ML developers**, **gamers**, and anyone running heavy GPU workloads.
+
+## 🧠 Key Feature: AI Engineer Dashboard
+
+A dedicated tab designed for AI engineers and ML practitioners:
+
+- **AI Process Detection** — automatically finds running AI/ML processes (Python, Ollama, PyTorch, TensorFlow, Stable Diffusion, ComfyUI, Whisper, LM Studio, and 30+ more)
+- **GPU for AI** — real-time VRAM usage bar, GPU load, temperature, and power/TDP breakdown
+- **Model Capacity Estimator** — shows which LLMs and AI models your GPU can run based on VRAM (22 models: Llama, Mistral, Mixtral, SDXL, FLUX, Whisper, etc.)
+- **Workload Status** — Active / Idle / No AI Workload indicator with process count and power attribution
+- **Environment Detection** — CUDA and Python availability check
 
 ## Features
 
@@ -40,6 +50,20 @@ Perfect for **AI/ML developers**, **gamers**, and anyone running heavy GPU workl
 - **Projections** — daily and monthly electricity cost estimates
 - **Power graph** — live power consumption history
 - **TDP info** — detected CPU & GPU TDP values
+
+### 🧠 AI Tab
+- **AI Workload Status** — Active/Idle/No AI Workload with glowing status indicator
+- **AI Processes** — table of detected AI/ML processes (PID, name, memory)
+- **GPU for AI** — VRAM bar (used/total/free), GPU load, temperature, power vs TDP
+- **Model Capacity Estimator** — 22 models across LLM, Vision, Diffusion, Audio categories with OK/NO compatibility
+- **Environment** — CUDA readiness, Python detection
+
+### 🔥 GPU Compute Tab
+- **NVML Real-Time Metrics** — temperature, power (mW precision), SM utilization, memory bus %, graphics/memory/SM clocks, fan speed, PCIe RX/TX bandwidth, NVENC/NVDEC utilization (dynamically loaded via `LoadLibrary` — no build dependency)
+- **Compute Capabilities** — CUDA compute capability, cores per SM, architecture detection (Maxwell→Blackwell), Tensor Core & RT Core detection, driver version
+- **Active GPU Processes** — lists all compute processes running on GPU with PID, name, and VRAM usage
+- **GPU Benchmark** — theoretical TFLOPS (FP32/FP16/INT8), measured VRAM bandwidth (GB/s via D3D11 buffer copy), AI readiness score (0-100) with labels like "EXCEPTIONAL" to "MINIMAL"
+- **Graceful Fallback** — if NVML is unavailable (non-NVIDIA GPU), shows a clear message and estimated data continue from DXGI/PDH
 
 ### System Tab
 - Computer name, username, OS version
@@ -91,6 +115,8 @@ cmake --build build --config Release
 - **OpenGL 3.0** — graphics rendering
 - **DXGI** — GPU hardware detection (name, VRAM)
 - **Windows PDH API** — CPU and GPU performance counters
+- **NVML** — NVIDIA GPU metrics (runtime loaded via `LoadLibrary`, no SDK required)
+- **Direct3D 11** — GPU benchmark VRAM bandwidth measurement
 - **Windows API** — memory, disk, power, process, network, registry
 - **IP Helper API** — network traffic statistics
 
@@ -108,7 +134,10 @@ System Monitor/
 │   ├── network_monitor.cpp   # Network traffic monitoring
 │   ├── system_info.cpp       # System information
 │   ├── energy_monitor.cpp    # Energy cost tracking
-│   └── gui.cpp               # ImGui interface (5 tabs)
+│   ├── ai_monitor.cpp        # AI process detection & model capacity
+│   ├── nvml_monitor.cpp      # NVML GPU metrics (dynamic loading)
+│   ├── gpu_benchmark.cpp     # GPU benchmark (TFLOPS + bandwidth)
+│   └── gui.cpp               # ImGui interface (7 tabs)
 ├── include/                   # Header files
 ├── external/                  # External libraries
 │   ├── imgui/                # ImGui library
