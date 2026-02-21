@@ -46,6 +46,8 @@ GUI::GUI()
   memset(downloadHistory, 0, sizeof(downloadHistory));
   memset(uploadHistory, 0, sizeof(uploadHistory));
   memset(powerHistory, 0, sizeof(powerHistory));
+  memset(diskReadHistory, 0, sizeof(diskReadHistory));
+  memset(diskWriteHistory, 0, sizeof(diskWriteHistory));
 }
 
 GUI::~GUI() { cleanup(); }
@@ -161,7 +163,11 @@ void GUI::render(double cpuUsage, const std::vector<double> &coreUsages,
                  const std::vector<ProcessInfo> &processes,
                  const NetworkInfo &netInfo, const SystemInfo &sysInfo,
                  const EnergyInfo &energyInfo, const AiInfo &aiInfo,
-                 const NvmlInfo &nvmlInfo, const BenchmarkResult &benchResult) {
+                 const NvmlInfo &nvmlInfo, const BenchmarkResult &benchResult,
+                 const std::vector<DiskDriveInfo> &allDrives,
+                 const DiskIOInfo &diskIOInfo, const CpuTempInfo &cpuTempInfo,
+                 const FrameAnalysis &frameAnalysis, const ScoreInfo &scoreInfo,
+                 ProcessMonitor &processMonitor) {
   // Update history
   float memPercent = static_cast<float>(memInfo.usagePercent);
   float gpuPercent =
@@ -169,7 +175,9 @@ void GUI::render(double cpuUsage, const std::vector<double> &coreUsages,
   updateHistory(static_cast<float>(cpuUsage), memPercent, gpuPercent,
                 static_cast<float>(netInfo.downloadSpeed),
                 static_cast<float>(netInfo.uploadSpeed),
-                static_cast<float>(energyInfo.totalWatts));
+                static_cast<float>(energyInfo.totalWatts),
+                static_cast<float>(diskIOInfo.readBytesPerSec),
+                static_cast<float>(diskIOInfo.writeBytesPerSec));
 
   // Smooth animations (lerp)
   float dt = ImGui::GetIO().DeltaTime;
@@ -199,7 +207,8 @@ void GUI::render(double cpuUsage, const std::vector<double> &coreUsages,
 
   // ── Sidebar ──
   ImGui::BeginChild("##Sidebar", ImVec2(sidebarWidth, totalHeight), false);
-  renderSidebar(cpuUsage, memInfo, diskInfo, gpuInfo, powerInfo, energyInfo);
+  renderSidebar(cpuUsage, memInfo, diskInfo, gpuInfo, powerInfo, energyInfo,
+                scoreInfo);
   ImGui::EndChild();
 
   ImGui::SameLine();
@@ -255,10 +264,10 @@ void GUI::render(double cpuUsage, const std::vector<double> &coreUsages,
   switch (currentTab) {
   case Tab::Overview:
     renderOverviewTab(cpuUsage, coreUsages, memInfo, diskInfo, gpuInfo,
-                      powerInfo, netInfo);
+                      powerInfo, netInfo, allDrives, diskIOInfo, cpuTempInfo);
     break;
   case Tab::Processes:
-    renderProcessesTab(processes);
+    renderProcessesTab(processes, processMonitor);
     break;
   case Tab::Network:
     renderNetworkTab(netInfo);
@@ -270,10 +279,10 @@ void GUI::render(double cpuUsage, const std::vector<double> &coreUsages,
     renderAiTab(aiInfo);
     break;
   case Tab::GpuCompute:
-    renderGpuComputeTab(nvmlInfo, benchResult);
+    renderGpuComputeTab(nvmlInfo, benchResult, frameAnalysis);
     break;
   case Tab::System:
-    renderSystemTab(sysInfo);
+    renderSystemTab(sysInfo, scoreInfo);
     break;
   }
   ImGui::EndChild();
@@ -286,7 +295,8 @@ void GUI::render(double cpuUsage, const std::vector<double> &coreUsages,
 void GUI::renderSidebar(double cpuUsage, const MemoryInfo &memInfo,
                         const DiskInfo &diskInfo, const GpuInfo &gpuInfo,
                         const PowerInfo &powerInfo,
-                        const EnergyInfo &energyInfo) {
+                        const EnergyInfo &energyInfo,
+                        const ScoreInfo &scoreInfo) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   ImVec2 pos = ImGui::GetCursorScreenPos();
   ImVec2 size = ImGui::GetContentRegionAvail();
@@ -375,6 +385,23 @@ void GUI::renderSidebar(double cpuUsage, const MemoryInfo &memInfo,
         << energyInfo.currency.c_str();
     ImGui::TextColored(COL_TEXT_DIM, "%s", oss.str().c_str());
   }
+
+  // Performance Score display
+  ImGui::Spacing();
+  ImGui::Spacing();
+  ImGui::Separator();
+  ImGui::Spacing();
+  ImGui::SetCursorPosX(24);
+  ImGui::TextColored(COL_TEXT_DIM, "PERFORMANCE");
+  ImGui::SetCursorPosX(24);
+  {
+    float scoreFraction = static_cast<float>(scoreInfo.overallScore) / 100.0f;
+    ImVec4 scoreColor = scoreFraction > 0.8f   ? COL_GREEN
+                        : scoreFraction > 0.5f ? COL_YELLOW
+                                               : COL_ORANGE;
+    ImGui::TextColored(scoreColor, "%d/100 [%s]", scoreInfo.overallScore,
+                       scoreInfo.grade.c_str());
+  }
 }
 
 // ─── Overview Tab ────────────────────────────────────────────────────────────
@@ -382,19 +409,38 @@ void GUI::renderOverviewTab(double cpuUsage,
                             const std::vector<double> &coreUsages,
                             const MemoryInfo &memInfo, const DiskInfo &diskInfo,
                             const GpuInfo &gpuInfo, const PowerInfo &powerInfo,
-                            const NetworkInfo &netInfo) {
+                            const NetworkInfo &netInfo,
+                            const std::vector<DiskDriveInfo> &allDrives,
+                            const DiskIOInfo &diskIOInfo,
+                            const CpuTempInfo &cpuTempInfo) {
   float contentWidth = ImGui::GetContentRegionAvail().x;
   float graphWidth = (contentWidth - 15) / 2.0f;
 
   // CPU section
   ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
-  ImGui::BeginChild("##CpuSection", ImVec2(graphWidth, 270), true);
+  ImGui::BeginChild("##CpuSection", ImVec2(graphWidth, 300), true);
   {
     ImGui::TextColored(COL_GREEN, "CPU USAGE");
-    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 80);
-    std::ostringstream oss;
-    oss << std::fixed << std::setprecision(1) << cpuUsage << "%%";
-    ImGui::TextColored(COL_TEXT, "%s", oss.str().c_str());
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 150);
+    // CPU Temperature
+    if (cpuTempInfo.available) {
+      ImVec4 tempColor = cpuTempInfo.isThrottling          ? COL_RED
+                         : cpuTempInfo.temperatureC > 75.0 ? COL_ORANGE
+                         : cpuTempInfo.temperatureC > 55.0 ? COL_YELLOW
+                                                           : COL_GREEN;
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(0) << cpuTempInfo.temperatureC
+          << " C";
+      ImGui::TextColored(tempColor, "%s", oss.str().c_str());
+      if (cpuTempInfo.isThrottling) {
+        ImGui::SameLine();
+        ImGui::TextColored(COL_RED, "THROTTLE!");
+      }
+    } else {
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(1) << cpuUsage << "%%";
+      ImGui::TextColored(COL_TEXT, "%s", oss.str().c_str());
+    }
     ImGui::Spacing();
     renderGraph("##cpuGraph", cpuHistory, HISTORY_SIZE, historyOffset, 100.0f,
                 COL_GREEN, ImVec2(-1, 120));
@@ -429,6 +475,14 @@ void GUI::renderOverviewTab(double cpuUsage,
 
       ImGui::Dummy(ImVec2(barWidth, barHeight));
     }
+    // Show CPU temp below cores if available
+    if (cpuTempInfo.available) {
+      ImGui::Spacing();
+      std::ostringstream oss2;
+      oss2 << std::fixed << std::setprecision(1) << cpuUsage << "%%  |  "
+           << std::setprecision(0) << cpuTempInfo.temperatureC << " C";
+      ImGui::TextColored(COL_TEXT_DIM, "%s", oss2.str().c_str());
+    }
   }
   ImGui::EndChild();
   ImGui::PopStyleColor();
@@ -437,7 +491,7 @@ void GUI::renderOverviewTab(double cpuUsage,
 
   // Memory section
   ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
-  ImGui::BeginChild("##MemSection", ImVec2(graphWidth, 270), true);
+  ImGui::BeginChild("##MemSection", ImVec2(graphWidth, 300), true);
   {
     ImGui::TextColored(COL_CYAN, "MEMORY USAGE");
     double usedGB =
@@ -523,40 +577,38 @@ void GUI::renderOverviewTab(double cpuUsage,
   ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
   ImGui::BeginChild("##DiskSection", ImVec2(thirdWidth, 220), true);
   {
-    ImGui::TextColored(COL_PURPLE, "DISK (C:)");
+    ImGui::TextColored(COL_PURPLE, "DISKS");
     ImGui::Spacing();
     ImGui::Spacing();
 
-    double totalGB =
-        static_cast<double>(diskInfo.totalSpace) / (1024.0 * 1024.0 * 1024.0);
-    double usedGB =
-        static_cast<double>(diskInfo.usedSpace) / (1024.0 * 1024.0 * 1024.0);
-    double freeGB =
-        static_cast<double>(diskInfo.freeSpace) / (1024.0 * 1024.0 * 1024.0);
+    // Show all drives
+    for (size_t d = 0; d < allDrives.size() && d < 6; d++) {
+      const auto &drv = allDrives[d];
+      double totalGB =
+          static_cast<double>(drv.totalSpace) / (1024.0 * 1024.0 * 1024.0);
+      double usedGB =
+          static_cast<double>(drv.usedSpace) / (1024.0 * 1024.0 * 1024.0);
+      double freeGB =
+          static_cast<double>(drv.freeSpace) / (1024.0 * 1024.0 * 1024.0);
 
-    std::ostringstream oss;
-    oss << std::fixed << std::setprecision(1) << usedGB << " / " << totalGB
-        << " GB";
-    ImGui::Text("%s", oss.str().c_str());
+      std::ostringstream oss;
+      oss << drv.driveLetter << " (" << drv.volumeLabel << ")";
+      ImGui::TextColored(COL_TEXT, "%s", oss.str().c_str());
 
-    float fraction = static_cast<float>(diskInfo.usagePercent) / 100.0f;
-    ImVec4 diskColor = fraction > 0.9f   ? COL_RED
-                       : fraction > 0.7f ? COL_YELLOW
-                                         : COL_PURPLE;
+      oss.str("");
+      oss << std::fixed << std::setprecision(1) << usedGB << " / " << totalGB
+          << " GB";
+      ImGui::SameLine(ImGui::GetContentRegionAvail().x - 120);
+      ImGui::TextColored(COL_TEXT_DIM, "%s", oss.str().c_str());
 
-    ImGui::Spacing();
-    ImGui::Spacing();
-    renderMiniBar("##diskBar", fraction, diskColor);
-
-    ImGui::Spacing();
-    ImGui::Spacing();
-    oss.str("");
-    oss << std::fixed << std::setprecision(1) << freeGB << " GB free";
-    ImGui::TextColored(COL_TEXT_DIM, "%s", oss.str().c_str());
-
-    oss.str("");
-    oss << std::fixed << std::setprecision(1) << diskInfo.usagePercent << "%%";
-    ImGui::TextColored(COL_TEXT, "%s", oss.str().c_str());
+      float fraction = static_cast<float>(drv.usagePercent) / 100.0f;
+      ImVec4 diskColor = fraction > 0.9f   ? COL_RED
+                         : fraction > 0.7f ? COL_YELLOW
+                                           : COL_PURPLE;
+      renderMiniBar((std::string("##diskBar") + drv.driveLetter).c_str(),
+                    fraction, diskColor);
+      ImGui::Spacing();
+    }
   }
   ImGui::EndChild();
   ImGui::PopStyleColor();
@@ -610,24 +662,104 @@ void GUI::renderOverviewTab(double cpuUsage,
   }
   ImGui::EndChild();
   ImGui::PopStyleColor();
+
+  ImGui::Spacing();
+  ImGui::Spacing();
+
+  // Row 3: Disk I/O
+  if (diskIOInfo.available) {
+    float ioHalfWidth = (contentWidth - 15) / 2.0f;
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
+    ImGui::BeginChild("##DiskReadIO", ImVec2(ioHalfWidth, 180), true);
+    {
+      ImGui::TextColored(COL_GREEN, "DISK READ");
+      ImGui::SameLine(ImGui::GetContentRegionAvail().x - 120);
+      ImGui::TextColored(COL_TEXT, "%s",
+                         formatSpeed(diskIOInfo.readBytesPerSec).c_str());
+      ImGui::Spacing();
+
+      float maxRead = 1.0f;
+      for (int i = 0; i < HISTORY_SIZE; i++) {
+        if (diskReadHistory[i] > maxRead)
+          maxRead = diskReadHistory[i];
+      }
+      renderGraph("##diskReadGraph", diskReadHistory, HISTORY_SIZE,
+                  historyOffset, maxRead * 1.2f, COL_GREEN, ImVec2(-1, 100));
+      ImGui::Spacing();
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(0) << diskIOInfo.readOpsPerSec
+          << " IOPS";
+      ImGui::TextColored(COL_TEXT_DIM, "%s", oss.str().c_str());
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+
+    ImGui::SameLine();
+
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
+    ImGui::BeginChild("##DiskWriteIO", ImVec2(ioHalfWidth, 180), true);
+    {
+      ImGui::TextColored(COL_ORANGE, "DISK WRITE");
+      ImGui::SameLine(ImGui::GetContentRegionAvail().x - 120);
+      ImGui::TextColored(COL_TEXT, "%s",
+                         formatSpeed(diskIOInfo.writeBytesPerSec).c_str());
+      ImGui::Spacing();
+
+      float maxWrite = 1.0f;
+      for (int i = 0; i < HISTORY_SIZE; i++) {
+        if (diskWriteHistory[i] > maxWrite)
+          maxWrite = diskWriteHistory[i];
+      }
+      renderGraph("##diskWriteGraph", diskWriteHistory, HISTORY_SIZE,
+                  historyOffset, maxWrite * 1.2f, COL_ORANGE, ImVec2(-1, 100));
+      ImGui::Spacing();
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(0) << diskIOInfo.writeOpsPerSec
+          << " IOPS";
+      ImGui::TextColored(COL_TEXT_DIM, "%s", oss.str().c_str());
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+  }
 }
 
 // ─── Processes Tab ───────────────────────────────────────────────────────────
-void GUI::renderProcessesTab(const std::vector<ProcessInfo> &processes) {
-  ImGui::TextColored(COL_ACCENT, "TOP PROCESSES (by Memory)");
+void GUI::renderProcessesTab(const std::vector<ProcessInfo> &processes,
+                             ProcessMonitor &processMonitor) {
+  float contentWidth = ImGui::GetContentRegionAvail().x;
+  ImGui::TextColored(COL_ACCENT, "TOP PROCESSES");
+
+  // Sort radio buttons
+  ImGui::SameLine(contentWidth - 250);
+  ImGui::TextColored(COL_TEXT_DIM, "Sort by:");
+  ImGui::SameLine();
+  bool sortByMem =
+      (processMonitor.getSortMode() == ProcessMonitor::SortMode::ByMemory);
+  bool sortByCpu =
+      (processMonitor.getSortMode() == ProcessMonitor::SortMode::ByCpu);
+
+  if (ImGui::RadioButton("Memory", sortByMem)) {
+    processMonitor.setSortMode(ProcessMonitor::SortMode::ByMemory);
+  }
+  ImGui::SameLine();
+  if (ImGui::RadioButton("CPU%%", sortByCpu)) {
+    processMonitor.setSortMode(ProcessMonitor::SortMode::ByCpu);
+  }
+
   ImGui::Spacing();
   ImGui::Spacing();
 
   ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY;
 
-  if (ImGui::BeginTable("##ProcessTable", 4, flags,
+  if (ImGui::BeginTable("##ProcessTable", 5, flags,
                         ImVec2(0, ImGui::GetContentRegionAvail().y - 10))) {
-    ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+    ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, 70.0f);
     ImGui::TableSetupColumn("Process Name", ImGuiTableColumnFlags_WidthStretch);
-    ImGui::TableSetupColumn("Memory", ImGuiTableColumnFlags_WidthFixed, 140.0f);
-    ImGui::TableSetupColumn("Memory Bar", ImGuiTableColumnFlags_WidthFixed,
-                            250.0f);
+    ImGui::TableSetupColumn("CPU %%", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+    ImGui::TableSetupColumn("Memory", ImGuiTableColumnFlags_WidthFixed, 120.0f);
+    ImGui::TableSetupColumn("Usage Bar", ImGuiTableColumnFlags_WidthFixed,
+                            220.0f);
     ImGui::TableSetupScrollFreeze(0, 1);
     ImGui::TableHeadersRow();
 
@@ -648,10 +780,19 @@ void GUI::renderProcessesTab(const std::vector<ProcessInfo> &processes) {
       ImGui::TextColored(COL_TEXT, "%s", proc.name.c_str());
 
       ImGui::TableSetColumnIndex(2);
-      ImGui::Text("%s", formatBytes(proc.memoryUsed).c_str());
+      ImVec4 cpuCol = proc.cpuUsage > 50.0
+                          ? COL_RED
+                          : (proc.cpuUsage > 10.0 ? COL_ORANGE : COL_GREEN);
+      ImGui::TextColored(cpuCol, "%.1f %%", proc.cpuUsage);
 
       ImGui::TableSetColumnIndex(3);
-      float frac = static_cast<float>((double)proc.memoryUsed / (double)maxMem);
+      ImGui::Text("%s", formatBytes(proc.memoryUsed).c_str());
+
+      ImGui::TableSetColumnIndex(4);
+      float frac =
+          (processMonitor.getSortMode() == ProcessMonitor::SortMode::ByCpu)
+              ? (static_cast<float>(proc.cpuUsage) / 100.0f)
+              : (static_cast<float>((double)proc.memoryUsed / (double)maxMem));
       ImVec4 barColor = i < 3 ? COL_RED : i < 7 ? COL_ORANGE : COL_ACCENT;
 
       ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -660,8 +801,9 @@ void GUI::renderProcessesTab(const std::vector<ProcessInfo> &processes) {
       float barH = 20.0f;
       dl->AddRectFilled(p, ImVec2(p.x + barW, p.y + barH),
                         ImColor(0.15f, 0.15f, 0.22f, 1.0f), 4.0f);
-      dl->AddRectFilled(p, ImVec2(p.x + barW * frac, p.y + barH),
-                        ImColor(barColor), 4.0f);
+      dl->AddRectFilled(
+          p, ImVec2(p.x + barW * std::clamp(frac, 0.0f, 1.0f), p.y + barH),
+          ImColor(barColor), 4.0f);
       ImGui::Dummy(ImVec2(barW, barH));
     }
     ImGui::EndTable();
@@ -1308,9 +1450,63 @@ static const ImVec4 COL_GPU_WARM = ImVec4(1.00f, 0.65f, 0.00f, 1.00f);
 static const ImVec4 COL_GPU_HOT = ImVec4(1.00f, 0.30f, 0.20f, 1.00f);
 
 void GUI::renderGpuComputeTab(const NvmlInfo &nvmlInfo,
-                              const BenchmarkResult &benchResult) {
+                              const BenchmarkResult &benchResult,
+                              const FrameAnalysis &frameAnalysis) {
   ImGui::TextColored(COL_GPU_ACCENT, "GPU COMPUTE DASHBOARD");
-  ImGui::SameLine(ImGui::GetContentRegionAvail().x - 200);
+  ImGui::SameLine(ImGui::GetContentRegionAvail().x - 220);
+  if (nvmlInfo.available) {
+    ImGui::TextColored(COL_TEXT_DIM, "NVML Active | Driver %s",
+                       nvmlInfo.driverVersion.c_str());
+  } else {
+    ImGui::TextColored(COL_RED, "NVML Not Available");
+  }
+  ImGui::Spacing();
+  ImGui::Spacing();
+
+  float contentWidth = ImGui::GetContentRegionAvail().x;
+  float halfWidth = (contentWidth - 15) / 2.0f;
+
+  // Row 1 Header: Performance Analysis (NEW)
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
+  ImGui::BeginChild("##PerfAnalysis", ImVec2(-1, 100), true);
+  {
+    ImGui::TextColored(COL_CYAN, "PERFORMANCE & BOTTLENECK ANALYSIS");
+    ImGui::Spacing();
+
+    float w = ImGui::GetContentRegionAvail().x;
+    float colW = w / 4.0f;
+
+    ImGui::Columns(4, "##perfcols", false);
+    ImGui::SetColumnWidth(0, colW);
+    ImGui::SetColumnWidth(1, colW);
+    ImGui::SetColumnWidth(2, colW);
+    ImGui::SetColumnWidth(3, colW);
+
+    ImGui::TextColored(COL_TEXT_DIM, "Est. FPS");
+    ImGui::TextColored(COL_GREEN, "%.0f FPS", frameAnalysis.estimatedFPS);
+    ImGui::NextColumn();
+
+    ImGui::TextColored(COL_TEXT_DIM, "Status");
+    ImGui::TextColored(COL_YELLOW, "%s", frameAnalysis.status.c_str());
+    ImGui::NextColumn();
+
+    ImGui::TextColored(COL_TEXT_DIM, "Bottleneck");
+    ImVec4 bCol = frameAnalysis.gpuBound
+                      ? COL_ORANGE
+                      : (frameAnalysis.cpuBound ? COL_RED : COL_GREEN);
+    ImGui::TextColored(bCol, "%s", frameAnalysis.bottleneck.c_str());
+    ImGui::NextColumn();
+
+    ImGui::TextColored(COL_TEXT_DIM, "Frame Times");
+    ImGui::TextColored(COL_TEXT, "G:%.1f ms | C:%.1f ms",
+                       frameAnalysis.gpuFrameTimeMs,
+                       frameAnalysis.cpuFrameTimeMs);
+    ImGui::Columns(1);
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
+
+  ImGui::Spacing();
   if (nvmlInfo.available) {
     ImGui::TextColored(COL_TEXT_DIM, "NVML Active | Driver %s",
                        nvmlInfo.driverVersion.c_str());
@@ -1588,18 +1784,82 @@ void GUI::renderGpuComputeTab(const NvmlInfo &nvmlInfo,
   ImGui::PopStyleColor();
 }
 
-// ─── System Tab (NEW) ───────────────────────────────────────────────────────
-void GUI::renderSystemTab(const SystemInfo &sysInfo) {
-  ImGui::TextColored(COL_ACCENT, "SYSTEM INFORMATION");
+void GUI::renderSystemTab(const SystemInfo &sysInfo,
+                          const ScoreInfo &scoreInfo) {
+  ImGui::TextColored(COL_ACCENT, "SYSTEM PERFORMANCE SCORE");
   ImGui::Spacing();
   ImGui::Spacing();
 
   float contentWidth = ImGui::GetContentRegionAvail().x;
+
+  // Big Score Header
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
+  ImGui::BeginChild("##ScoreHeader", ImVec2(-1, 140), true);
+  {
+    float h = ImGui::GetContentRegionAvail().y;
+    ImGui::Columns(2, "##scorehead", false);
+    ImGui::SetColumnWidth(0, 150);
+
+    // Giant Grade
+    ImGui::SetCursorPosY((h - 80) / 2.0f);
+    float oldScale = ImGui::GetFont()->Scale;
+    ImGui::GetFont()->Scale = 4.0f;
+    ImGui::PushFont(ImGui::GetFont());
+    ImVec4 gCol = scoreInfo.overallScore > 80
+                      ? COL_GREEN
+                      : (scoreInfo.overallScore > 50 ? COL_YELLOW : COL_RED);
+    ImGui::TextColored(gCol, " %s", scoreInfo.grade.c_str());
+    ImGui::GetFont()->Scale = oldScale;
+    ImGui::PopFont();
+
+    ImGui::NextColumn();
+    ImGui::SetCursorPosY(20);
+    ImGui::TextColored(COL_TEXT_DIM, "OVERALL PERFORMANCE SCORE");
+    ImGui::ProgressBar(scoreInfo.overallScore / 100.0f, ImVec2(-1, 30), "");
+    std::ostringstream oss;
+    oss << scoreInfo.overallScore << "/100 Points";
+    ImGui::TextColored(COL_TEXT, "%s", oss.str().c_str());
+    ImGui::Columns(1);
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
+
+  ImGui::Spacing();
+  ImGui::Spacing();
+
   float halfWidth = (contentWidth - 15) / 2.0f;
 
-  // ── Left: Computer & OS ──
+  // Detailed Scores
   ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
-  ImGui::BeginChild("##SysComputer", ImVec2(halfWidth, 280), true);
+  ImGui::BeginChild("##DetailedScores", ImVec2(halfWidth, 240), true);
+  {
+    ImGui::TextColored(COL_CYAN, "COMPONENT BREAKDOWN");
+    ImGui::Spacing();
+
+    auto renderScoreBar = [&](const char *label, int score, ImVec4 col) {
+      ImGui::TextColored(COL_TEXT_DIM, "%s", label);
+      ImGui::SameLine(120);
+      ImGui::ProgressBar(score / 100.0f, ImVec2(-1, 14), "");
+      ImGui::SameLine(ImGui::GetItemRectMax().x - 40);
+      ImGui::Text("%d", score);
+    };
+
+    renderScoreBar("CPU", scoreInfo.cpuScore, COL_GREEN);
+    ImGui::Spacing();
+    renderScoreBar("GPU", scoreInfo.gpuScore, COL_ORANGE);
+    ImGui::Spacing();
+    renderScoreBar("Memory", scoreInfo.memoryScore, COL_CYAN);
+    ImGui::Spacing();
+    renderScoreBar("Disk", scoreInfo.diskScore, COL_PURPLE);
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
+
+  ImGui::SameLine();
+
+  // Core System Info (Shifted)
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
+  ImGui::BeginChild("##SysComputer", ImVec2(halfWidth, 240), true);
   {
     // Computer icon header
     ImGui::TextColored(COL_CYAN, "COMPUTER");
@@ -1801,13 +2061,16 @@ void GUI::renderMiniBar(const char *label, float fraction, ImVec4 color) {
 
 // ─── History Update ──────────────────────────────────────────────────────────
 void GUI::updateHistory(float cpuVal, float memVal, float gpuVal, float dlVal,
-                        float ulVal, float wattsVal) {
+                        float ulVal, float wattsVal, float diskReadVal,
+                        float diskWriteVal) {
   cpuHistory[historyOffset] = cpuVal;
   memHistory[historyOffset] = memVal;
   gpuHistory[historyOffset] = gpuVal;
   downloadHistory[historyOffset] = dlVal;
   uploadHistory[historyOffset] = ulVal;
   powerHistory[historyOffset] = wattsVal;
+  diskReadHistory[historyOffset] = diskReadVal;
+  diskWriteHistory[historyOffset] = diskWriteVal;
   historyOffset = (historyOffset + 1) % HISTORY_SIZE;
 }
 

@@ -40,6 +40,7 @@ set(SOURCES
     src/cpu_monitor.cpp
     src/memory_monitor.cpp
     src/disk_monitor.cpp
+    src/disk_io_monitor.cpp
     src/gpu_monitor.cpp
     src/power_monitor.cpp
     src/process_monitor.cpp
@@ -49,6 +50,9 @@ set(SOURCES
     src/ai_monitor.cpp
     src/nvml_monitor.cpp
     src/gpu_benchmark.cpp
+    src/cpu_temp_monitor.cpp
+    src/performance_analyzer.cpp
+    src/performance_score.cpp
     src/gui.cpp
 )
 
@@ -64,6 +68,9 @@ target_link_libraries(${PROJECT_NAME}
     iphlpapi     # IP Helper API (network stats)
     dxgi         # DXGI (GPU detection)
     d3d11        # Direct3D 11 (GPU benchmark)
+    wbemuuid     # WMI (CPU temperature)
+    ole32        # COM support
+    oleaut32     # COM Automation
 )
 
 # Set as startup project for Visual Studio

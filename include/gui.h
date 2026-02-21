@@ -2,6 +2,8 @@
 
 #include "ai_monitor.h"
 #include "cpu_monitor.h"
+#include "cpu_temp_monitor.h"
+#include "disk_io_monitor.h"
 #include "disk_monitor.h"
 #include "energy_monitor.h"
 #include "gpu_benchmark.h"
@@ -9,6 +11,8 @@
 #include "memory_monitor.h"
 #include "network_monitor.h"
 #include "nvml_monitor.h"
+#include "performance_analyzer.h"
+#include "performance_score.h"
 #include "power_monitor.h"
 #include "process_monitor.h"
 #include "system_info.h"
@@ -43,7 +47,11 @@ public:
               const std::vector<ProcessInfo> &processes,
               const NetworkInfo &netInfo, const SystemInfo &sysInfo,
               const EnergyInfo &energyInfo, const AiInfo &aiInfo,
-              const NvmlInfo &nvmlInfo, const BenchmarkResult &benchResult);
+              const NvmlInfo &nvmlInfo, const BenchmarkResult &benchResult,
+              const std::vector<DiskDriveInfo> &allDrives,
+              const DiskIOInfo &diskIOInfo, const CpuTempInfo &cpuTempInfo,
+              const FrameAnalysis &frameAnalysis, const ScoreInfo &scoreInfo,
+              ProcessMonitor &processMonitor);
   void endFrame();
   void cleanup();
 
@@ -60,6 +68,8 @@ private:
   float downloadHistory[HISTORY_SIZE];
   float uploadHistory[HISTORY_SIZE];
   float powerHistory[HISTORY_SIZE]; // Watts history for energy tab
+  float diskReadHistory[HISTORY_SIZE];
+  float diskWriteHistory[HISTORY_SIZE];
   int historyOffset;
 
   // Smooth animation values
@@ -73,18 +83,24 @@ private:
   void setupStyle();
   void renderSidebar(double cpuUsage, const MemoryInfo &memInfo,
                      const DiskInfo &diskInfo, const GpuInfo &gpuInfo,
-                     const PowerInfo &powerInfo, const EnergyInfo &energyInfo);
+                     const PowerInfo &powerInfo, const EnergyInfo &energyInfo,
+                     const ScoreInfo &scoreInfo);
   void renderOverviewTab(double cpuUsage, const std::vector<double> &coreUsages,
                          const MemoryInfo &memInfo, const DiskInfo &diskInfo,
                          const GpuInfo &gpuInfo, const PowerInfo &powerInfo,
-                         const NetworkInfo &netInfo);
-  void renderProcessesTab(const std::vector<ProcessInfo> &processes);
+                         const NetworkInfo &netInfo,
+                         const std::vector<DiskDriveInfo> &allDrives,
+                         const DiskIOInfo &diskIOInfo,
+                         const CpuTempInfo &cpuTempInfo);
+  void renderProcessesTab(const std::vector<ProcessInfo> &processes,
+                          ProcessMonitor &processMonitor);
   void renderNetworkTab(const NetworkInfo &netInfo);
   void renderEnergyTab(const EnergyInfo &energyInfo, const GpuInfo &gpuInfo);
   void renderAiTab(const AiInfo &aiInfo);
   void renderGpuComputeTab(const NvmlInfo &nvmlInfo,
-                           const BenchmarkResult &benchResult);
-  void renderSystemTab(const SystemInfo &sysInfo);
+                           const BenchmarkResult &benchResult,
+                           const FrameAnalysis &frameAnalysis);
+  void renderSystemTab(const SystemInfo &sysInfo, const ScoreInfo &scoreInfo);
 
   // Custom widgets
   void renderCircularGauge(const char *label, float fraction, ImVec4 color,
@@ -96,7 +112,8 @@ private:
 
   // Utilities
   void updateHistory(float cpuVal, float memVal, float gpuVal, float dlVal,
-                     float ulVal, float wattsVal);
+                     float ulVal, float wattsVal, float diskReadVal,
+                     float diskWriteVal);
   static std::string formatBytes(uint64_t bytes);
   static std::string formatSpeed(double bytesPerSec);
   static std::string formatUptime(uint64_t seconds);
