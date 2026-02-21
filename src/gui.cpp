@@ -1518,8 +1518,8 @@ void GUI::renderGpuComputeTab(const NvmlInfo &nvmlInfo,
   ImGui::Spacing();
   ImGui::Spacing();
 
-  float contentWidth = ImGui::GetContentRegionAvail().x;
-  float halfWidth = (contentWidth - 15) / 2.0f;
+  contentWidth = ImGui::GetContentRegionAvail().x;
+  halfWidth = (contentWidth - 15) / 2.0f;
 
   // ── Panel 1: NVML Real-Time Metrics (left) ──
   ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_PANEL);
