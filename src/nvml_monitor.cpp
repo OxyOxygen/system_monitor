@@ -222,7 +222,9 @@ void NvmlMonitor::update() {
   if (pfnGetDecoder)
     pfnGetDecoder(device, &info.decoderUtil, &samplingPeriod);
 
-  // GPU Compute Processes
+  // GPU Compute Processes (Commented out frequent snapshots to save
+  // performance)
+  /*
   if (pfnGetProcesses) {
     info.gpuProcesses.clear();
     unsigned int procCount = 32;
@@ -241,7 +243,7 @@ void NvmlMonitor::update() {
           do {
             char name[MAX_PATH] = {};
             WideCharToMultiByte(CP_UTF8, 0, pe.szExeFile, -1, name,
-                                sizeof(name), nullptr, nullptr);
+                                 sizeof(name), nullptr, nullptr);
             pidNames.push_back({pe.th32ProcessID, name});
           } while (Process32NextW(snapshot, &pe));
         }
@@ -267,4 +269,5 @@ void NvmlMonitor::update() {
       }
     }
   }
+  */
 }

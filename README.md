@@ -61,6 +61,11 @@ A dedicated tab designed for AI engineers and ML practitioners:
 - **Model Capacity Estimator** — 22 models across LLM, Vision, Diffusion, Audio categories with OK/NO compatibility
 - **Environment** — CUDA readiness, Python detection
 
+### 🎮 Modern Performance & Gaming
+- [NEW] **Game Mode** — Reduce polling frequency (from 1s to 2s) to minimize CPU impact while playing heavy games.
+- [NEW] **Game Overlay** — Lightweight, semi-transparent info box that stays on top of games. Shows CPU/GPU load and temperature.
+- [NEW] **Optimized Background Engine** — Reduced overhead by caching process names and optimizing NVML hardware queries.
+
 ### 🔥 GPU Compute & Gaming Tab
 - [NEW] **Gaming Performance Dashboard** — Estimated FPS and frame time tracking (CPU vs GPU ms)
 - [NEW] **Bottleneck Analysis** — High-precision detection for CPU or GPU limited scenarios
@@ -79,6 +84,7 @@ A dedicated tab designed for AI engineers and ML practitioners:
 ### Sidebar
 - Circular gauge widgets for CPU, Memory, Disk, GPU, and Battery
 - Live power draw display (watts) with session cost
+- [NEW] **Toggle Controls** — Quickly enable/disable Game Mode and Overlay directly from the sidebar.
 - Smooth animated value transitions
 
 ## Requirements

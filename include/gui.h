@@ -56,10 +56,18 @@ public:
   void endFrame();
   void cleanup();
 
+  bool isGameMode() const { return gameMode; }
+  void setGameMode(bool enabled) { gameMode = enabled; }
+
+  bool isShowOverlay() const { return showOverlay; }
+  void setShowOverlay(bool enabled) { showOverlay = enabled; }
+
 private:
   GLFWwindow *window;
   bool initialized;
   Tab currentTab;
+  bool gameMode;
+  bool showOverlay;
 
   // History buffers for graphs (last 60 samples)
   static constexpr int HISTORY_SIZE = 60;
@@ -102,6 +110,8 @@ private:
                            const BenchmarkResult &benchResult,
                            const FrameAnalysis &frameAnalysis);
   void renderSystemTab(const SystemInfo &sysInfo, const ScoreInfo &scoreInfo);
+  void renderOverlay(double cpuUsage, const MemoryInfo &memInfo,
+                     const GpuInfo &gpuInfo, const CpuTempInfo &cpuTempInfo);
 
   // Custom widgets
   void renderCircularGauge(const char *label, float fraction, ImVec4 color,

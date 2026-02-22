@@ -78,8 +78,11 @@ int main() {
     auto now = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed = now - lastUpdate;
 
+    // GAME MODE: Reduce polling rate if in game mode to save resources
+    double effectiveInterval = gui.isGameMode() ? 2.0 : updateInterval;
+
     // Update monitor data at specified interval
-    if (elapsed.count() >= updateInterval) {
+    if (elapsed.count() >= effectiveInterval) {
       cpuUsage = cpuMonitor.getCpuUsage();
       coreUsages = cpuMonitor.getPerCoreUsage();
       memInfo = memoryMonitor.getMemoryInfo();

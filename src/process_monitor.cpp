@@ -72,8 +72,12 @@ std::vector<ProcessInfo> ProcessMonitor::getTopProcesses(int count) {
     info.memoryUsed = 0;
 
     // Open process to get memory info and CPU times
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
-                                  FALSE, pe32.th32ProcessID);
+    // PERFORMANCE: Only open process for top N processes if possible, or use
+    // faster methods. For now, let's keep it but handle failure more
+    // gracefully.
+    HANDLE hProcess =
+        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE,
+                    pe32.th32ProcessID);
     if (hProcess != nullptr) {
       // Memory info
       PROCESS_MEMORY_COUNTERS pmc;

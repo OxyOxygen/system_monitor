@@ -41,7 +41,7 @@ static const ImVec4 COL_BORDER = ImVec4(0.18f, 0.18f, 0.25f, 1.00f);
 GUI::GUI()
     : window(nullptr), initialized(false), currentTab(Tab::Overview),
       historyOffset(0), animCpu(0), animMem(0), animDisk(0), animGpu(0),
-      animBattery(0) {
+      animBattery(0), gameMode(false), showOverlay(false) {
   memset(cpuHistory, 0, sizeof(cpuHistory));
   memset(memHistory, 0, sizeof(memHistory));
   memset(gpuHistory, 0, sizeof(gpuHistory));
@@ -291,6 +291,42 @@ void GUI::render(double cpuUsage, const std::vector<double> &coreUsages,
 
   ImGui::EndChild(); // MainContent
   ImGui::End();      // Root
+
+  if (showOverlay) {
+    renderOverlay(cpuUsage, memInfo, gpuInfo, cpuTempInfo);
+  }
+}
+
+void GUI::renderOverlay(double cpuUsage, const MemoryInfo &memInfo,
+                        const GpuInfo &gpuInfo,
+                        const CpuTempInfo &cpuTempInfo) {
+  // Transparent overlay window
+  ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+  ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.12f, 0.75f));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
+
+  ImGui::Begin("##Overlay", nullptr,
+               ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize |
+                   ImGuiWindowFlags_NoFocusOnAppearing |
+                   ImGuiWindowFlags_NoNav);
+
+  ImGui::TextColored(COL_GREEN, "CPU %.1f%%", (float)cpuUsage);
+  if (cpuTempInfo.available) {
+    ImGui::SameLine();
+    ImGui::TextColored(COL_TEXT_DIM, "| %.0fC",
+                       (float)cpuTempInfo.temperatureC);
+  }
+
+  double memPercent = memInfo.usagePercent;
+  ImGui::TextColored(COL_CYAN, "MEM %.1f%%", (float)memPercent);
+
+  if (gpuInfo.available) {
+    ImGui::TextColored(COL_ORANGE, "GPU %.1f%%", (float)gpuInfo.gpuUsage);
+  }
+
+  ImGui::End();
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
 }
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
@@ -404,6 +440,22 @@ void GUI::renderSidebar(double cpuUsage, const MemoryInfo &memInfo,
     ImGui::TextColored(scoreColor, "%d/100 [%s]", scoreInfo.overallScore,
                        scoreInfo.grade.c_str());
   }
+
+  // Settings / Game Mode
+  ImGui::Spacing();
+  ImGui::Spacing();
+  ImGui::Separator();
+  ImGui::Spacing();
+  ImGui::SetCursorPosX(24);
+  ImGui::TextColored(COL_ACCENT, "SETTINGS");
+
+  ImGui::SetCursorPosX(24);
+  if (ImGui::Checkbox("Game Mode", &gameMode)) {
+    // Game mode logic handled in main loop polling
+  }
+
+  ImGui::SetCursorPosX(24);
+  ImGui::Checkbox("Show Overlay", &showOverlay);
 }
 
 // ─── Overview Tab ────────────────────────────────────────────────────────────
