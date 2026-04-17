@@ -70,6 +70,8 @@ CpuMonitor::~CpuMonitor() {
   }
 }
 
+#include <cmath>
+
 double CpuMonitor::getCpuUsage() {
   if (!initialized) {
     return 0.0;
@@ -91,7 +93,12 @@ double CpuMonitor::getCpuUsage() {
     return 0.0;
   }
 
-  return counterValue.doubleValue;
+  double usage = counterValue.doubleValue;
+  if (std::isnan(usage) || std::isinf(usage)) usage = 0.0;
+  if (usage < 0.0) usage = 0.0;
+  if (usage > 100.0) usage = 100.0;
+  
+  return usage;
 }
 
 std::vector<double> CpuMonitor::getPerCoreUsage() {

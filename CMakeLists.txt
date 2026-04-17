@@ -53,7 +53,9 @@ set(SOURCES
     src/cpu_temp_monitor.cpp
     src/performance_analyzer.cpp
     src/performance_score.cpp
+    src/hpc_engine.cpp
     src/gui.cpp
+    src/gaming_session.cpp
 )
 
 # Create executable

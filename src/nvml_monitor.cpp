@@ -1,6 +1,38 @@
 #include "nvml_monitor.h"
 #include <algorithm>
+#include <filesystem>
+#include <psapi.h>
 #include <tlhelp32.h>
+#include <vector>
+
+std::string NvmlMonitor::resolveProcessNameWithCache(unsigned int pid) {
+  auto now = std::chrono::steady_clock::now();
+  auto it = processNameCache.find(pid);
+  if (it != processNameCache.end() && (now - it->second.lastUpdated) < std::chrono::seconds(5)) {
+    return it->second.name;
+  }
+
+  std::string name = "Unknown";
+  HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+  if (hProcess) {
+    wchar_t path[MAX_PATH];
+    DWORD size = MAX_PATH;
+    if (QueryFullProcessImageNameW(hProcess, 0, path, &size)) {
+      std::filesystem::path p(path);
+      std::wstring filename = p.filename().wstring();
+      int required_size = WideCharToMultiByte(CP_UTF8, 0, filename.c_str(), -1, nullptr, 0, nullptr, nullptr);
+      if (required_size > 0) {
+        std::vector<char> buffer(required_size);
+        WideCharToMultiByte(CP_UTF8, 0, filename.c_str(), -1, buffer.data(), required_size, nullptr, nullptr);
+        name = std::string(buffer.data());
+      }
+    }
+    CloseHandle(hProcess);
+  }
+
+  processNameCache[pid] = {name, now};
+  return name;
+}
 
 // ============================================================================
 // Library Loading
@@ -63,6 +95,16 @@ void NvmlMonitor::resolveSymbols() {
           GetProcAddress(hNvml, "nvmlDeviceGetComputeRunningProcesses_v3"));
   pfnGetName = reinterpret_cast<PFN_nvmlDeviceGetName>(
       GetProcAddress(hNvml, "nvmlDeviceGetName"));
+  pfnGetMemInfo = reinterpret_cast<PFN_nvmlDeviceGetMemoryInfo>(
+      GetProcAddress(hNvml, "nvmlDeviceGetMemoryInfo"));
+  pfnGetEnforcedPowerLimit = reinterpret_cast<PFN_nvmlDeviceGetEnforcedPowerLimit>(
+      GetProcAddress(hNvml, "nvmlDeviceGetEnforcedPowerLimit"));
+  pfnGetMaxPcieLinkGen = reinterpret_cast<PFN_nvmlDeviceGetMaxPcieLinkGeneration>(
+      GetProcAddress(hNvml, "nvmlDeviceGetMaxPcieLinkGeneration"));
+  pfnGetCurrPcieLinkGen = reinterpret_cast<PFN_nvmlDeviceGetCurrPcieLinkGeneration>(
+      GetProcAddress(hNvml, "nvmlDeviceGetCurrPcieLinkGeneration"));
+  pfnGetCurrPcieLinkWidth = reinterpret_cast<PFN_nvmlDeviceGetCurrPcieLinkWidth>(
+      GetProcAddress(hNvml, "nvmlDeviceGetCurrPcieLinkWidth"));
 
 #undef LOAD_FN
 }
@@ -90,7 +132,7 @@ bool NvmlMonitor::init() {
     return false;
   }
 
-  // Get first device
+  // Get device handles for all GPUs
   unsigned int deviceCount = 0;
   if (pfnGetCount)
     pfnGetCount(&deviceCount);
@@ -102,23 +144,42 @@ bool NvmlMonitor::init() {
     return false;
   }
 
-  if (pfnGetHandle(0, &device) != NVML_SUCCESS) {
-    pfnShutdown();
-    FreeLibrary(hNvml);
-    hNvml = nullptr;
-    return false;
+  devices.clear();
+  info.devices.clear();
+
+  for (unsigned int i = 0; i < deviceCount; i++) {
+    nvmlDevice_t dev = nullptr;
+    if (pfnGetHandle && pfnGetHandle(i, &dev) == NVML_SUCCESS) {
+      devices.push_back(dev);
+      NvmlDeviceInfo devInfo = {};
+      
+      // Static info for this device
+      if (pfnGetName) {
+        char name[128] = {};
+        if (pfnGetName(dev, name, sizeof(name)) == NVML_SUCCESS)
+          devInfo.name = name;
+      }
+      
+      if (pfnGetCudaCap) {
+        pfnGetCudaCap(dev, &devInfo.cudaCapMajor, &devInfo.cudaCapMinor);
+        devInfo.cudaCoreCount = getCudaCoreCount(devInfo.cudaCapMajor, devInfo.cudaCapMinor);
+      }
+      
+      if (pfnGetEnforcedPowerLimit) {
+        unsigned int limit = 0;
+        if (pfnGetEnforcedPowerLimit(dev, &limit) == NVML_SUCCESS)
+          devInfo.tdpWatts = limit / 1000;
+      }
+      
+      info.devices.push_back(devInfo);
+    }
   }
 
-  // Get static info (driver, CUDA capability)
+  // Get global info
   if (pfnGetDriverVer) {
     char ver[80] = {};
     if (pfnGetDriverVer(ver, sizeof(ver)) == NVML_SUCCESS)
       info.driverVersion = ver;
-  }
-
-  if (pfnGetCudaCap) {
-    pfnGetCudaCap(device, &info.cudaCapMajor, &info.cudaCapMinor);
-    info.cudaCoreCount = getCudaCoreCount(info.cudaCapMajor, info.cudaCapMinor);
   }
 
   nvmlLoaded = true;
@@ -126,148 +187,124 @@ bool NvmlMonitor::init() {
   return true;
 }
 
-NvmlMonitor::~NvmlMonitor() {
-  if (pfnShutdown)
-    pfnShutdown();
-  if (hNvml)
-    FreeLibrary(hNvml);
+NvmlMonitor::NvmlMonitor() : hNvml(nullptr), nvmlLoaded(false) {
+  processThread = std::thread(&NvmlMonitor::processWorkerLoop, this);
 }
 
-// ============================================================================
-// CUDA Core Count Lookup
-// ============================================================================
+NvmlMonitor::~NvmlMonitor() {
+  stopProcessThread = true;
+  if (processThread.joinable()) processThread.join();
+  if (pfnShutdown) pfnShutdown();
+  if (hNvml) FreeLibrary(hNvml);
+}
 
 int NvmlMonitor::getCudaCoreCount(int major, int minor) const {
-  // SM count is not directly available from NVML, so we estimate CUDA cores
-  // based on compute capability. This is the cores-per-SM for each arch.
-  // Actual total = SM_count * cores_per_SM, but NVML doesn't expose SM count.
-  // We'll return cores_per_SM as a reference, and calculate total TFLOPS
-  // in benchmark using clock speeds.
-
-  // Cores per SM by compute capability
   switch (major) {
-  case 2:
-    return (minor == 1) ? 48 : 32; // Fermi
-  case 3:
-    return 192; // Kepler
-  case 5:
-    return 128; // Maxwell
-  case 6:
-    return (minor == 0) ? 64 : 128; // Pascal
-  case 7:
-    return 64; // Volta/Turing
-  case 8:
-    return (minor == 0) ? 64 : 128; // Ampere
-  case 9:
-    return 128; // Ada Lovelace
-  case 10:
-    return 128; // Blackwell
-  default:
-    return 128; // Future architectures, guess
+  case 2: return (minor == 1) ? 48 : 32;
+  case 3: return 192;
+  case 5: return 128;
+  case 6: return (minor == 0) ? 64 : 128;
+  case 7: return 64;
+  case 8: return (minor == 0) ? 64 : 128;
+  case 9: return 128;
+  case 10: return 128;
+  default: return 128;
   }
 }
 
-// ============================================================================
-// Update — Query All Metrics
-// ============================================================================
+NvmlInfo NvmlMonitor::getInfo() const {
+  std::lock_guard<std::mutex> lock(infoMutex);
+  return info;
+}
 
-void NvmlMonitor::update() {
-  if (!nvmlLoaded || !device)
-    return;
-
-  // Temperature
-  if (pfnGetTemp)
-    pfnGetTemp(device, NVML_TEMPERATURE_GPU, &info.temperatureC);
-
-  // Power (milliwatts)
-  if (pfnGetPower) {
-    pfnGetPower(device, &info.powerMilliwatts);
-    info.powerWatts = info.powerMilliwatts / 1000.0f;
+void NvmlMonitor::processWorkerLoop() {
+  // Wait for init to complete
+  while (!nvmlLoaded && !stopProcessThread) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  // Utilization
-  if (pfnGetUtil) {
-    nvmlUtilization_t util = {};
-    if (pfnGetUtil(device, &util) == NVML_SUCCESS) {
-      info.gpuUtil = util.gpu;
-      info.memUtil = util.memory;
-    }
-  }
-
-  // Clocks
-  if (pfnGetClock) {
-    pfnGetClock(device, NVML_CLOCK_GRAPHICS, &info.graphicsClock);
-    pfnGetClock(device, NVML_CLOCK_SM, &info.smClock);
-    pfnGetClock(device, NVML_CLOCK_MEM, &info.memClock);
-  }
-
-  if (pfnGetMaxClock) {
-    pfnGetMaxClock(device, NVML_CLOCK_GRAPHICS, &info.maxGraphicsClock);
-  }
-
-  // Fan
-  if (pfnGetFan)
-    pfnGetFan(device, &info.fanSpeedPercent);
-
-  // PCIe Throughput
-  if (pfnGetPcie) {
-    pfnGetPcie(device, NVML_PCIE_UTIL_RX_BYTES, &info.pcieRxKBs);
-    pfnGetPcie(device, NVML_PCIE_UTIL_TX_BYTES, &info.pcieTxKBs);
-  }
-
-  // Encoder / Decoder
-  unsigned int samplingPeriod = 0;
-  if (pfnGetEncoder)
-    pfnGetEncoder(device, &info.encoderUtil, &samplingPeriod);
-  if (pfnGetDecoder)
-    pfnGetDecoder(device, &info.decoderUtil, &samplingPeriod);
-
-  // GPU Compute Processes (Commented out frequent snapshots to save
-  // performance)
-  /*
-  if (pfnGetProcesses) {
-    info.gpuProcesses.clear();
-    unsigned int procCount = 32;
-    nvmlProcessInfo_t procs[32] = {};
-
-    nvmlReturn_t ret = pfnGetProcesses(device, &procCount, procs);
-    if (ret == NVML_SUCCESS && procCount > 0) {
-      // Build a PID→name map from system snapshot
-      HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-      std::vector<std::pair<DWORD, std::string>> pidNames;
-
-      if (snapshot != INVALID_HANDLE_VALUE) {
-        PROCESSENTRY32W pe;
-        pe.dwSize = sizeof(PROCESSENTRY32W);
-        if (Process32FirstW(snapshot, &pe)) {
-          do {
-            char name[MAX_PATH] = {};
-            WideCharToMultiByte(CP_UTF8, 0, pe.szExeFile, -1, name,
-                                 sizeof(name), nullptr, nullptr);
-            pidNames.push_back({pe.th32ProcessID, name});
-          } while (Process32NextW(snapshot, &pe));
-        }
-        CloseHandle(snapshot);
+  while (!stopProcessThread) {
+    if (nvmlLoaded && !devices.empty()) {
+      // Create a local copy to update without locking
+      NvmlInfo localInfo;
+      {
+        std::lock_guard<std::mutex> lock(infoMutex);
+        localInfo = info;
       }
 
-      for (unsigned int i = 0; i < procCount; i++) {
-        GpuProcessInfo gp;
-        gp.pid = procs[i].pid;
-        gp.vramUsageBytes = procs[i].usedGpuMemory;
+      for (size_t i = 0; i < devices.size(); i++) {
+        nvmlDevice_t dev = devices[i];
+        if (i >= localInfo.devices.size()) continue;
+        NvmlDeviceInfo &dInfo = localInfo.devices[i];
 
-        // Lookup name
-        for (const auto &pn : pidNames) {
-          if (pn.first == gp.pid) {
-            gp.name = pn.second;
-            break;
+        // 1. Hardware Metrics (Fast)
+        if (pfnGetTemp) pfnGetTemp(dev, NVML_TEMPERATURE_GPU, &dInfo.temperatureC);
+        if (pfnGetPower && pfnGetPower(dev, &dInfo.powerMilliwatts) == NVML_SUCCESS)
+          dInfo.powerWatts = dInfo.powerMilliwatts / 1000.0f;
+        
+        nvmlUtilization_t util = {};
+        if (pfnGetUtil && pfnGetUtil(dev, &util) == NVML_SUCCESS) {
+          dInfo.gpuUtil = util.gpu;
+          dInfo.memUtil = util.memory;
+        }
+
+        nvmlMemory_t mem = {};
+        if (pfnGetMemInfo && pfnGetMemInfo(dev, &mem) == NVML_SUCCESS) {
+          dInfo.vramTotal = mem.total;
+          dInfo.vramUsed = mem.used;
+          dInfo.vramFree = mem.free;
+        }
+
+        if (pfnGetClock) {
+          pfnGetClock(dev, NVML_CLOCK_GRAPHICS, &dInfo.graphicsClock);
+          pfnGetClock(dev, NVML_CLOCK_SM, &dInfo.smClock);
+          pfnGetClock(dev, NVML_CLOCK_MEM, &dInfo.memClock);
+        }
+        if (pfnGetMaxClock) pfnGetMaxClock(dev, NVML_CLOCK_GRAPHICS, &dInfo.maxGraphicsClock);
+        if (pfnGetFan) pfnGetFan(dev, &dInfo.fanSpeedPercent);
+        if (pfnGetCurrPcieLinkGen) pfnGetCurrPcieLinkGen(dev, &dInfo.pcieGeneration);
+        if (pfnGetCurrPcieLinkWidth) pfnGetCurrPcieLinkWidth(dev, &dInfo.pcieWidth);
+        if (pfnGetPcie) {
+          pfnGetPcie(dev, NVML_PCIE_UTIL_RX_BYTES, &dInfo.pcieRxKBs);
+          pfnGetPcie(dev, NVML_PCIE_UTIL_TX_BYTES, &dInfo.pcieTxKBs);
+        }
+        
+        unsigned int sap = 0;
+        if (pfnGetEncoder) pfnGetEncoder(dev, &dInfo.encoderUtil, &sap);
+        if (pfnGetDecoder) pfnGetDecoder(dev, &dInfo.decoderUtil, &sap);
+
+        // 2. Process Enumeration (Slow - only if pfnGetProcesses exists)
+        if (pfnGetProcesses) {
+          dInfo.gpuProcesses.clear();
+          unsigned int procCount = 32;
+          nvmlProcessInfo_t procs[32] = {};
+          if (pfnGetProcesses(dev, &procCount, procs) == NVML_SUCCESS && procCount > 0) {
+            for (unsigned int p = 0; p < procCount; p++) {
+              GpuProcessInfo gp;
+              gp.pid = procs[p].pid;
+              gp.vramUsageBytes = procs[p].usedGpuMemory;
+              gp.name = resolveProcessNameWithCache(gp.pid);
+              dInfo.gpuProcesses.push_back(gp);
+            }
           }
         }
-        if (gp.name.empty())
-          gp.name = "Unknown";
+      }
 
-        info.gpuProcesses.push_back(gp);
+      // 3. Thread-safe swap (Fastest possible lock)
+      {
+        std::lock_guard<std::mutex> lock(infoMutex);
+        info = std::move(localInfo);
       }
     }
+    
+    // Background polling interval (500ms for smoothness)
+    for (int i = 0; i < 5 && !stopProcessThread; i++) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
   }
-  */
+}
+
+void NvmlMonitor::update() {
+  // Main thread update is now a no-op.
+  // getInfo() provides the latest background-pushed data.
 }

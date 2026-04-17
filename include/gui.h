@@ -16,6 +16,8 @@
 #include "power_monitor.h"
 #include "process_monitor.h"
 #include "system_info.h"
+#include "hpc_engine.h"
+#include "gaming_session.h"
 
 #include "imgui.h"
 #include <cstdint>
@@ -31,7 +33,9 @@ enum class Tab {
   Energy,
   AI,
   GpuCompute,
-  System
+  System,
+  HpcAssistant,
+  GamingSession
 };
 
 class GUI {
@@ -52,7 +56,9 @@ public:
               const std::vector<DiskDriveInfo> &allDrives,
               const DiskIOInfo &diskIOInfo, const CpuTempInfo &cpuTempInfo,
               const FrameAnalysis &frameAnalysis, const ScoreInfo &scoreInfo,
-              ProcessMonitor &processMonitor);
+              const HpcReport &hpcReport,
+              ProcessMonitor &processMonitor,
+              GamingSessionMonitor &sessionMonitor, HpcEngine &hpcEngine);
   void endFrame();
   void cleanup();
 
@@ -69,6 +75,10 @@ private:
   bool gameMode;
   bool showOverlay;
 
+  // Session state
+  HpcReport hpcReportSession;
+  bool showSessionReport = false;
+
   // History buffers for graphs (last 60 samples)
   static constexpr int HISTORY_SIZE = 60;
   float cpuHistory[HISTORY_SIZE];
@@ -76,7 +86,7 @@ private:
   float gpuHistory[HISTORY_SIZE];
   float downloadHistory[HISTORY_SIZE];
   float uploadHistory[HISTORY_SIZE];
-  float powerHistory[HISTORY_SIZE]; // Watts history for energy tab
+  float powerHistory[HISTORY_SIZE];
   float diskReadHistory[HISTORY_SIZE];
   float diskWriteHistory[HISTORY_SIZE];
   int historyOffset;
@@ -110,6 +120,8 @@ private:
                            const BenchmarkResult &benchResult,
                            const FrameAnalysis &frameAnalysis);
   void renderSystemTab(const SystemInfo &sysInfo, const ScoreInfo &scoreInfo);
+  void renderHpcAssistantTab(const HpcReport &hpcReport);
+  void renderGamingSessionTab(GamingSessionMonitor &sessionMonitor, HpcEngine &hpcEngine);
   void renderOverlay(double cpuUsage, const MemoryInfo &memInfo,
                      const GpuInfo &gpuInfo, const CpuTempInfo &cpuTempInfo);
 
@@ -122,6 +134,7 @@ private:
   void renderInfoRow(const char *label, const char *value, ImVec4 valueColor);
 
   // Utilities
+  void saveReportToTxt(const HpcReport &report, const SessionMetrics &metrics);
   void updateHistory(float cpuVal, float memVal, float gpuVal, float dlVal,
                      float ulVal, float wattsVal, float diskReadVal,
                      float diskWriteVal);

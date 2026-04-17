@@ -44,7 +44,7 @@ int GpuBenchmark::getCoresPerSm(int major, int minor) const {
 // Estimate SM Count from GPU Name (common cards)
 // ============================================================================
 
-int GpuBenchmark::estimateSmCount(const NvmlInfo &nvmlInfo) const {
+int GpuBenchmark::estimateSmCount(const NvmlDeviceInfo &devInfo) const {
   // Without direct NVML SM count API, we use a lookup for popular GPUs.
   // This gives us total_cores = smCount * coresPerSM for TFLOPS calculation.
   struct GpuSm {
@@ -279,21 +279,21 @@ std::string GpuBenchmark::getCurrentTimestamp() const {
 // Run Benchmark
 // ============================================================================
 
-BenchmarkResult GpuBenchmark::runBenchmark(const NvmlInfo &nvmlInfo) {
+BenchmarkResult GpuBenchmark::runBenchmark(const NvmlDeviceInfo &devInfo) {
   running = true;
-  BenchmarkResult result;
+  BenchmarkResult result = {};
 
   // Get SM count and cores per SM
-  int smCount = estimateSmCount(nvmlInfo);
-  int coresPerSm = getCoresPerSm(nvmlInfo.cudaCapMajor, nvmlInfo.cudaCapMinor);
-  int totalCores = smCount * coresPerSm;
+  int smCount = estimateSmCount(devInfo);
+  int coresPerSm = getCoresPerSm(devInfo.cudaCapMajor, devInfo.cudaCapMinor);
+  int totalCores = devInfo.cudaCoreCount > 0 ? devInfo.cudaCoreCount : (smCount * coresPerSm);
 
   result.smCount = smCount;
   result.cudaCores = totalCores;
-  result.clockMHz = nvmlInfo.graphicsClock > 0 ? nvmlInfo.graphicsClock : 1500;
+  result.clockMHz = devInfo.graphicsClock > 0 ? devInfo.graphicsClock : (devInfo.maxGraphicsClock > 0 ? devInfo.maxGraphicsClock : 1500);
 
   // Tensor cores: available from Volta (7.0) onwards
-  result.hasTensorCores = (nvmlInfo.cudaCapMajor >= 7);
+  result.hasTensorCores = (devInfo.cudaCapMajor >= 7);
 
   // Theoretical TFLOPS
   // FP32: cores * clock * 2 (FMA) / 1e6

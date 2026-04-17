@@ -40,7 +40,7 @@ public:
   GpuBenchmark() = default;
 
   // Run benchmark using NVML data + DXGI bandwidth test
-  BenchmarkResult runBenchmark(const NvmlInfo &nvmlInfo);
+  BenchmarkResult runBenchmark(const NvmlDeviceInfo &devInfo);
 
   // Access results
   const BenchmarkResult &getLastResult() const { return lastResult; }
@@ -48,7 +48,7 @@ public:
   bool isRunning() const { return running; }
 
 private:
-  int estimateSmCount(const NvmlInfo &nvmlInfo) const;
+  int estimateSmCount(const NvmlDeviceInfo &devInfo) const;
   int getCoresPerSm(int major, int minor) const;
   float measureVramBandwidth() const;
   int calculateScore(const BenchmarkResult &result) const;

@@ -4,6 +4,7 @@
 #include "disk_io_monitor.h"
 #include "disk_monitor.h"
 #include "energy_monitor.h"
+#include "gaming_session.h"
 #include "gpu_benchmark.h"
 #include "gpu_monitor.h"
 #include "gui.h"
@@ -15,6 +16,7 @@
 #include "power_monitor.h"
 #include "process_monitor.h"
 #include "system_info.h"
+#include "hpc_engine.h"
 #include <chrono>
 #include <cstdint>
 #include <thread>
@@ -44,6 +46,8 @@ int main() {
   CpuTempMonitor cpuTempMonitor;
   PerformanceAnalyzer perfAnalyzer;
   PerformanceScore perfScore;
+  HpcEngine hpcEngine;
+  GamingSessionMonitor sessionMonitor;
 
   // Initialize NVML (graceful if not available)
   nvmlMonitor.init();
@@ -70,6 +74,7 @@ int main() {
   CpuTempInfo cpuTempInfo = {};
   FrameAnalysis frameAnalysis = {};
   ScoreInfo scoreInfo = {};
+  HpcReport hpcReport = {};
   bool benchmarkRan = false;
   bool scoreCalculated = false;
 
@@ -112,19 +117,26 @@ int main() {
         nvmlMonitor.update();
         nvmlInfo = nvmlMonitor.getInfo();
 
-        // Auto-run benchmark once after first NVML update
-        if (!benchmarkRan) {
-          benchResult = gpuBenchmark.runBenchmark(nvmlInfo);
+        if (!benchmarkRan && !nvmlInfo.devices.empty()) {
+          benchResult = gpuBenchmark.runBenchmark(nvmlInfo.devices[0]);
           benchmarkRan = true;
         }
 
-        // Update performance analyzer with NVML clocks
-        perfAnalyzer.update(cpuUsage, gpuInfo.gpuUsage, nvmlInfo.graphicsClock,
-                            nvmlInfo.maxGraphicsClock);
+        // Update performance analyzer with NVML clocks from first device
+        if (!nvmlInfo.devices.empty()) {
+          perfAnalyzer.update(cpuUsage, gpuInfo.gpuUsage, 
+                              nvmlInfo.devices[0].graphicsClock,
+                              nvmlInfo.devices[0].maxGraphicsClock);
+        } else {
+          perfAnalyzer.update(cpuUsage, gpuInfo.gpuUsage, 0, 0);
+        }
       } else {
         perfAnalyzer.update(cpuUsage, gpuInfo.gpuUsage, 0, 0);
       }
       frameAnalysis = perfAnalyzer.getAnalysis();
+
+      // Update HPC Engine
+      hpcReport = hpcEngine.analyze(nvmlInfo, netInfo, diskIOInfo, cpuUsage, memInfo);
 
       // Calculate performance score once (or periodically)
       if (!scoreCalculated) {
@@ -132,10 +144,14 @@ int main() {
             cpuMonitor.getNumCores(), 0.0, // Clock speed not easily available
             memInfo.totalRAM, memInfo.totalRAM - memInfo.usedRAM,
             gpuInfo.vramTotal, benchmarkRan ? benchResult.fp32Tflops : 0.0,
-            nvmlInfo.cudaCapMajor, diskInfo.totalSpace, diskInfo.freeSpace);
+            nvmlInfo.devices.empty() ? 0 : nvmlInfo.devices[0].cudaCapMajor, 
+            diskInfo.totalSpace, diskInfo.freeSpace);
         scoreInfo = perfScore.getScore();
         scoreCalculated = true;
       }
+
+      // Update Session Monitor
+      sessionMonitor.update(cpuUsage, nvmlInfo, memInfo, netInfo, processes, frameAnalysis.estimatedFPS);
 
       lastUpdate = now;
     }
@@ -145,7 +161,8 @@ int main() {
     gui.render(cpuUsage, coreUsages, memInfo, diskInfo, gpuInfo, powerInfo,
                processes, netInfo, systemInfoMonitor.getInfo(), energyInfo,
                aiInfo, nvmlInfo, benchResult, allDrives, diskIOInfo,
-               cpuTempInfo, frameAnalysis, scoreInfo, processMonitor);
+               cpuTempInfo, frameAnalysis, scoreInfo, hpcReport, processMonitor,
+               sessionMonitor, hpcEngine);
     gui.endFrame();
 
     // Small sleep to prevent excessive CPU usage by the monitor itself
