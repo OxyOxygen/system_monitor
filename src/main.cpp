@@ -25,7 +25,7 @@
 int main() {
   // Initialize GUI
   GUI gui;
-  if (!gui.init("System Monitor", 1600, 900)) {
+  if (!gui.init("AI Workstation & Performance Monitor v7.0", 1600, 900)) {
     return -1;
   }
 

@@ -34,8 +34,8 @@ enum class Tab {
   AI,
   GpuCompute,
   System,
-  HpcAssistant,
-  GamingSession
+  Intelligence,
+  Analytics
 };
 
 class GUI {
@@ -120,8 +120,8 @@ private:
                            const BenchmarkResult &benchResult,
                            const FrameAnalysis &frameAnalysis);
   void renderSystemTab(const SystemInfo &sysInfo, const ScoreInfo &scoreInfo);
-  void renderHpcAssistantTab(const HpcReport &hpcReport);
-  void renderGamingSessionTab(GamingSessionMonitor &sessionMonitor, HpcEngine &hpcEngine);
+  void renderIntelligenceTab(const HpcReport &hpcReport);
+  void renderAnalyticsTab(GamingSessionMonitor &sessionMonitor, HpcEngine &hpcEngine);
   void renderOverlay(double cpuUsage, const MemoryInfo &memInfo,
                      const GpuInfo &gpuInfo, const CpuTempInfo &cpuTempInfo);
 
